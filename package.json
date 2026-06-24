@@ -1,6 +1,6 @@
 {
   "name": "nyx-analytics",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Nyx Analytics — privacy-first, cookieless web analytics in cosmic lobster style 🦞🌌",
   "main": "server.js",
   "type": "commonjs",

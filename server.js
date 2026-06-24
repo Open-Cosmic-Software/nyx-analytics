@@ -202,9 +202,16 @@ function auth(req, res, next) {
 // ── sites management ─────────────────────────────────────────────────────────
 const sitesListHandler = (_req, res) => res.json(allSites.all());
 const sitesCreateHandler = (req, res) => {
-  const domain = norm(req.body && req.body.domain);
-  if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Enter a valid domain, e.g. example.com' });
-  insSite.run(domain, (req.body && req.body.name) || domain, Date.now());
+  const rawDomain = norm(req.body && req.body.domain);
+  let domain = rawDomain;
+  let displayName = rawDomain; // keep Unicode original for a readable display name (e.g. ernährungs-plan.de)
+  // IDN support: convert Unicode/umlaut domains to Punycode (stored), keep Unicode as display name
+  if (domain && /[^\x00-\x7F]/.test(domain)) {
+    try { domain = new URL('http://' + domain).hostname; } catch (_) { /* fall through to validation */ }
+  }
+  // Allow ASCII domains AND Punycode (xn--...). Unicode input was converted above.
+  if (!domain || !/^[a-z0-9.-]+\.[a-z0-9-]{2,}$/.test(domain)) return res.status(400).json({ error: 'Enter a valid domain, e.g. example.com' });
+  insSite.run(domain, (req.body && req.body.name) || displayName, Date.now());
   res.json(getSiteByDomain.get(domain));
 };
 app.get('/api/sites', auth, sitesListHandler);
