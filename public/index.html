@@ -5,15 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nyx Analytics 🦞</title>
 <meta name="robots" content="noindex">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦞</text></svg>">
+<link rel="icon" href="/assets/nyx-logo-256.png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<!-- cosmic background -->
+<div class="cosmic-bg"></div>
+<div class="cosmic-overlay"></div>
+<div class="starfield"><div class="stars"></div><div class="stars"></div><div class="stars"></div></div>
+<div class="shooting-star"></div>
+<div class="shooting-star"></div>
+
 <!-- Login -->
 <div id="login" class="modal-overlay">
   <div class="modal">
-    <span class="logo">🦞</span>
-    <h2>Nyx Analytics</h2>
+    <img class="logo" src="/assets/nyx-logo-256.png" alt="Nyx">
+    <h2 class="grad-text">Nyx Analytics</h2>
     <p>Cosmic, cookieless analytics. Enter the passphrase.</p>
     <div id="loginErr" class="err"></div>
     <input id="pw" type="password" placeholder="Passphrase" autocomplete="current-password">
@@ -25,9 +32,9 @@
 <div id="app" class="container hide">
   <header>
     <div class="brand">
-      <span class="logo">🦞</span>
+      <img class="logo" src="/assets/nyx-logo-256.png" alt="Nyx">
       <div>
-        <h1>Nyx Analytics</h1>
+        <h1 class="grad-text">Nyx Analytics</h1>
         <div class="subtitle">cosmic · cookieless · yours</div>
       </div>
     </div>
@@ -52,7 +59,7 @@
 
   <div id="dash">
     <div class="stats">
-      <div class="card stat"><div class="label">Unique visitors</div><div class="value grad" id="s-visitors">—</div></div>
+      <div class="card stat"><div class="label">Unique visitors</div><div class="value grad-text" id="s-visitors">—</div></div>
       <div class="card stat"><div class="label">Pageviews</div><div class="value" id="s-pageviews">—</div></div>
       <div class="card stat"><div class="label">Bounce rate</div><div class="value" id="s-bounce">—</div></div>
       <div class="card stat"><div class="label">Views / visitor</div><div class="value" id="s-vpv">—</div></div>
@@ -83,8 +90,8 @@
 <!-- Add site modal -->
 <div id="addModal" class="modal-overlay hide">
   <div class="modal">
-    <span class="logo">🛰️</span>
-    <h2>Add a site</h2>
+    <span class="logo em">🛰️</span>
+    <h2 class="grad-text">Add a site</h2>
     <p>Enter the domain you want to track.</p>
     <div id="addErr" class="err"></div>
     <input id="newDomain" type="text" placeholder="example.com" autocomplete="off">
@@ -96,8 +103,8 @@
 <!-- Snippet modal -->
 <div id="snippetModal" class="modal-overlay hide">
   <div class="modal">
-    <span class="logo">&lt;/&gt;</span>
-    <h2>Embed code</h2>
+    <span class="logo em">&lt;/&gt;</span>
+    <h2 class="grad-text">Embed code</h2>
     <p>Paste this once into the <code>&lt;head&gt;</code> of <strong id="snipDomain"></strong>.</p>
     <div class="snippet" id="snippetCode"></div>
     <button class="btn" id="copySnippet">Copy snippet</button>
