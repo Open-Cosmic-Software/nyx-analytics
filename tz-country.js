@@ -1,0 +1,32 @@
+// Rough IANA timezone → ISO-3166 alpha-2 country. Privacy-preserving region hint
+// derived from the visitor's browser timezone (no IP geolocation). Not exhaustive
+// — unmapped zones fall back to showing the raw timezone in the dashboard.
+module.exports = {
+  'Europe/Berlin': 'DE', 'Europe/Vienna': 'AT', 'Europe/Zurich': 'CH', 'Europe/Busingen': 'DE',
+  'Europe/London': 'GB', 'Europe/Dublin': 'IE', 'Europe/Paris': 'FR', 'Europe/Madrid': 'ES',
+  'Europe/Lisbon': 'PT', 'Europe/Rome': 'IT', 'Europe/Amsterdam': 'NL', 'Europe/Brussels': 'BE',
+  'Europe/Luxembourg': 'LU', 'Europe/Copenhagen': 'DK', 'Europe/Oslo': 'NO', 'Europe/Stockholm': 'SE',
+  'Europe/Helsinki': 'FI', 'Europe/Warsaw': 'PL', 'Europe/Prague': 'CZ', 'Europe/Bratislava': 'SK',
+  'Europe/Budapest': 'HU', 'Europe/Bucharest': 'RO', 'Europe/Sofia': 'BG', 'Europe/Athens': 'GR',
+  'Europe/Zagreb': 'HR', 'Europe/Ljubljana': 'SI', 'Europe/Belgrade': 'RS', 'Europe/Tallinn': 'EE',
+  'Europe/Riga': 'LV', 'Europe/Vilnius': 'LT', 'Europe/Kyiv': 'UA', 'Europe/Kiev': 'UA',
+  'Europe/Moscow': 'RU', 'Europe/Istanbul': 'TR', 'Europe/Madrid/Canary': 'ES', 'Atlantic/Canary': 'ES',
+  'Atlantic/Reykjavik': 'IS', 'Europe/Malta': 'MT',
+  'America/New_York': 'US', 'America/Detroit': 'US', 'America/Chicago': 'US', 'America/Denver': 'US',
+  'America/Phoenix': 'US', 'America/Los_Angeles': 'US', 'America/Anchorage': 'US', 'Pacific/Honolulu': 'US',
+  'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Edmonton': 'CA', 'America/Winnipeg': 'CA',
+  'America/Halifax': 'CA', 'America/Mexico_City': 'MX', 'America/Monterrey': 'MX', 'America/Tijuana': 'MX',
+  'America/Sao_Paulo': 'BR', 'America/Fortaleza': 'BR', 'America/Bahia': 'BR', 'America/Buenos_Aires': 'AR',
+  'America/Argentina/Buenos_Aires': 'AR', 'America/Santiago': 'CL', 'America/Bogota': 'CO', 'America/Lima': 'PE',
+  'America/Caracas': 'VE', 'America/Montevideo': 'UY',
+  'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Shanghai': 'CN', 'Asia/Hong_Kong': 'HK',
+  'Asia/Taipei': 'TW', 'Asia/Singapore': 'SG', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID',
+  'Asia/Kuala_Lumpur': 'MY', 'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Kolkata': 'IN',
+  'Asia/Calcutta': 'IN', 'Asia/Karachi': 'PK', 'Asia/Dhaka': 'BD', 'Asia/Dubai': 'AE',
+  'Asia/Riyadh': 'SA', 'Asia/Jerusalem': 'IL', 'Asia/Tel_Aviv': 'IL', 'Asia/Tehran': 'IR',
+  'Asia/Baghdad': 'IQ', 'Asia/Qatar': 'QA', 'Asia/Beirut': 'LB',
+  'Africa/Cairo': 'EG', 'Africa/Johannesburg': 'ZA', 'Africa/Lagos': 'NG', 'Africa/Nairobi': 'KE',
+  'Africa/Casablanca': 'MA', 'Africa/Tunis': 'TN', 'Africa/Algiers': 'DZ', 'Africa/Accra': 'GH',
+  'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Australia/Brisbane': 'AU', 'Australia/Perth': 'AU',
+  'Australia/Adelaide': 'AU', 'Pacific/Auckland': 'NZ',
+};

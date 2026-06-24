@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nyx Analytics 🦞</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦞</text></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- Login -->
+<div id="login" class="modal-overlay">
+  <div class="modal">
+    <span class="logo">🦞</span>
+    <h2>Nyx Analytics</h2>
+    <p>Cosmic, cookieless analytics. Enter the passphrase.</p>
+    <div id="loginErr" class="err"></div>
+    <input id="pw" type="password" placeholder="Passphrase" autocomplete="current-password">
+    <button class="btn" id="loginBtn">Enter the void →</button>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="container hide">
+  <header>
+    <div class="brand">
+      <span class="logo">🦞</span>
+      <div>
+        <h1>Nyx Analytics</h1>
+        <div class="subtitle">cosmic · cookieless · yours</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="realtime"><span class="dot"></span><span id="realtime">0</span> online now</div>
+      <select id="siteSelect"></select>
+      <button class="btn ghost" id="addSiteBtn">+ Add site</button>
+      <button class="btn ghost danger" id="logoutBtn">Logout</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="periods" id="periods">
+      <button data-p="today">Today</button>
+      <button data-p="7d" class="active">7 days</button>
+      <button data-p="30d">30 days</button>
+      <button data-p="90d">90 days</button>
+      <button data-p="12mo">12 mo</button>
+    </div>
+    <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
+  </div>
+
+  <div id="dash">
+    <div class="stats">
+      <div class="card stat"><div class="label">Unique visitors</div><div class="value grad" id="s-visitors">—</div></div>
+      <div class="card stat"><div class="label">Pageviews</div><div class="value" id="s-pageviews">—</div></div>
+      <div class="card stat"><div class="label">Bounce rate</div><div class="value" id="s-bounce">—</div></div>
+      <div class="card stat"><div class="label">Views / visitor</div><div class="value" id="s-vpv">—</div></div>
+    </div>
+
+    <div class="card chart-card">
+      <div class="chart-head">
+        <strong id="chartTitle">Visitors</strong>
+        <div class="legend">
+          <span><span class="swatch" style="background:#e879a8"></span>Visitors</span>
+          <span><span class="swatch" style="background:#67e8f9"></span>Pageviews</span>
+        </div>
+      </div>
+      <svg id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="panels">
+      <div class="card panel"><h3><span class="em">📄</span> Top pages</h3><div class="bars" id="p-pages"></div></div>
+      <div class="card panel"><h3><span class="em">🔗</span> Sources</h3><div class="bars" id="p-sources"></div></div>
+      <div class="card panel"><h3><span class="em">🌍</span> Locations</h3><div class="bars" id="p-countries"></div></div>
+      <div class="card panel"><h3><span class="em">🧭</span> Browsers</h3><div class="bars" id="p-browsers"></div></div>
+      <div class="card panel"><h3><span class="em">💻</span> OS</h3><div class="bars" id="p-os"></div></div>
+      <div class="card panel"><h3><span class="em">📱</span> Devices</h3><div class="bars" id="p-devices"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add site modal -->
+<div id="addModal" class="modal-overlay hide">
+  <div class="modal">
+    <span class="logo">🛰️</span>
+    <h2>Add a site</h2>
+    <p>Enter the domain you want to track.</p>
+    <div id="addErr" class="err"></div>
+    <input id="newDomain" type="text" placeholder="example.com" autocomplete="off">
+    <button class="btn" id="createSiteBtn">Create →</button>
+    <button class="btn ghost" id="cancelAdd" style="margin-top:10px">Cancel</button>
+  </div>
+</div>
+
+<!-- Snippet modal -->
+<div id="snippetModal" class="modal-overlay hide">
+  <div class="modal">
+    <span class="logo">&lt;/&gt;</span>
+    <h2>Embed code</h2>
+    <p>Paste this once into the <code>&lt;head&gt;</code> of <strong id="snipDomain"></strong>.</p>
+    <div class="snippet" id="snippetCode"></div>
+    <button class="btn" id="copySnippet">Copy snippet</button>
+    <button class="btn ghost" id="closeSnippet" style="margin-top:10px">Close</button>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+<script src="/app.js"></script>
+</body>
+</html>
