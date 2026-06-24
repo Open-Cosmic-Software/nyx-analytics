@@ -11,18 +11,19 @@
     var lang = (navigator.language || '').slice(0, 12);
     var first = true;
 
-    function send() {
+    function send(name) {
       // ignore local/preview hosts
       if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') return;
       var payload = {
         d: domain,
         p: location.pathname,
-        r: first ? document.referrer : '',
+        r: name ? '' : (first ? document.referrer : ''),
         tz: tz,
         l: lang,
         s: new URLSearchParams(location.search).get('utm_source') || '',
       };
-      first = false;
+      if (name) payload.n = name;
+      else first = false;
       try {
         var body = JSON.stringify(payload);
         // text/plain keeps it a CORS-"simple" request, so the cross-origin beacon
@@ -44,6 +45,9 @@
     var replace = history.replaceState;
     history.replaceState = function () { replace.apply(this, arguments); onNav(); };
     window.addEventListener('popstate', onNav);
+
+    // Custom events / goals:  nyx('Signup')  ·  nyx('Download')
+    window.nyx = function (name) { if (name && typeof name === 'string') send(name.slice(0, 80)); };
 
     // initial pageview
     if (document.visibilityState === 'prerender') {

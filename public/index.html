@@ -39,7 +39,7 @@
       </div>
     </div>
     <div class="header-right">
-      <div class="realtime"><span class="dot"></span><span id="realtime">0</span> online now</div>
+      <div class="realtime" id="realtimeBtn" title="View live visitors" style="cursor:pointer"><span class="dot"></span><span id="realtime">0</span> online now</div>
       <select id="siteSelect"></select>
       <button class="btn ghost" id="addSiteBtn">+ Add site</button>
       <button class="btn ghost danger" id="logoutBtn">Logout</button>
@@ -54,13 +54,16 @@
       <button data-p="90d">90 days</button>
       <button data-p="12mo">12 mo</button>
     </div>
-    <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn ghost" id="exportBtn">⬇ CSV</button>
+      <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
+    </div>
   </div>
 
   <div id="dash">
     <div class="stats">
-      <div class="card stat"><div class="label">Unique visitors</div><div class="value grad-text" id="s-visitors">—</div></div>
-      <div class="card stat"><div class="label">Pageviews</div><div class="value" id="s-pageviews">—</div></div>
+      <div class="card stat"><div class="label">Unique visitors</div><div class="value grad-text" id="s-visitors">—</div><span class="trend" id="t-visitors"></span></div>
+      <div class="card stat"><div class="label">Pageviews</div><div class="value" id="s-pageviews">—</div><span class="trend" id="t-pageviews"></span></div>
       <div class="card stat"><div class="label">Bounce rate</div><div class="value" id="s-bounce">—</div></div>
       <div class="card stat"><div class="label">Views / visitor</div><div class="value" id="s-vpv">—</div></div>
     </div>
@@ -83,6 +86,7 @@
       <div class="card panel"><h3><span class="em">🧭</span> Browsers</h3><div class="bars" id="p-browsers"></div></div>
       <div class="card panel"><h3><span class="em">💻</span> OS</h3><div class="bars" id="p-os"></div></div>
       <div class="card panel"><h3><span class="em">📱</span> Devices</h3><div class="bars" id="p-devices"></div></div>
+      <div class="card panel"><h3><span class="em">🎯</span> Goals &amp; events</h3><div class="bars" id="p-goals"></div></div>
     </div>
   </div>
 </div>
@@ -107,8 +111,24 @@
     <h2 class="grad-text">Embed code</h2>
     <p>Paste this once into the <code>&lt;head&gt;</code> of <strong id="snipDomain"></strong>.</p>
     <div class="snippet" id="snippetCode"></div>
+    <p class="muted" style="text-align:left;font-size:.78rem;margin:-2px 0 12px">Track goals from your code:<br><code style="color:var(--cyan)">nyx('Signup')</code> · <code style="color:var(--cyan)">nyx('Download')</code></p>
     <button class="btn" id="copySnippet">Copy snippet</button>
     <button class="btn ghost" id="closeSnippet" style="margin-top:10px">Close</button>
+  </div>
+</div>
+
+<!-- Live visitors modal -->
+<div id="liveModal" class="modal-overlay hide">
+  <div class="modal live">
+    <div class="live-head">
+      <h2 class="grad-text">🛰️ Live</h2>
+      <span class="realtime"><span class="dot"></span><span id="live-online">0</span> online</span>
+    </div>
+    <p class="live-sub">Visitors over the last 30 minutes · updates every few seconds</p>
+    <svg id="live-spark" viewBox="0 0 600 70" preserveAspectRatio="none"></svg>
+    <div class="feed-label">Recent activity</div>
+    <div class="feed" id="live-feed"></div>
+    <button class="btn ghost" id="closeLive" style="margin-top:14px">Close</button>
   </div>
 </div>
 

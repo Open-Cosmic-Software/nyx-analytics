@@ -21,6 +21,7 @@ try {
 
 const PORT = parseInt(process.env.PORT) || 3920;
 const WEB_PASSWORD = process.env.WEB_PASSWORD || 'nyx';
+const API_KEY = process.env.API_KEY || ''; // for agents / CLI (Bearer token)
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(16).toString('hex');
 const INGEST_SALT = process.env.INGEST_SALT || 'nyx-analytics-salt';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'analytics.db');
@@ -49,19 +50,22 @@ db.exec(`
     os TEXT,
     device TEXT,
     lang TEXT,
+    name TEXT,
     vh TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_events_site_ts ON events(site_id, ts);
   CREATE INDEX IF NOT EXISTS idx_events_site_day ON events(site_id, day);
   CREATE INDEX IF NOT EXISTS idx_events_vh ON events(site_id, vh, day);
 `);
+// migration: custom-event name column (for installs created before goals existed)
+if (!db.prepare('PRAGMA table_info(events)').all().some((c) => c.name === 'name')) db.exec('ALTER TABLE events ADD COLUMN name TEXT');
 
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
 const insSite = db.prepare('INSERT OR IGNORE INTO sites (domain, name, created) VALUES (?, ?, ?)');
 const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
-const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, vh)
-  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @vh)`);
+const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, vh)
+  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @vh)`);
 
 // ── UA parsing + bot filter ─────────────────────────────────────────────────
 const BOT_RE = /bot|crawl|spider|slurp|bing|google|yandex|baidu|duckduck|facebookexternal|embedly|quora|pinterest|slackbot|telegrambot|whatsapp|twitter|discordbot|preview|monitor|uptime|pingdom|lighthouse|headless|phantom|curl|wget|python-requests|axios|node-fetch|go-http/i;
@@ -106,6 +110,17 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb', type: ['application/json', 'text/plain'] }));
 app.disable('x-powered-by');
 
+// Lightweight in-memory rate limiter (fixed window per key). No external dep.
+const rl = new Map();
+function rateLimited(key, max, windowMs) {
+  const now = Date.now();
+  let e = rl.get(key);
+  if (!e || e.reset < now) { e = { n: 0, reset: now + windowMs }; rl.set(key, e); }
+  e.n++;
+  return e.n > max;
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of rl) if (v.reset < now) rl.delete(k); }, 60000).unref();
+
 // ── tracking script (served with permissive CORS so any site can embed) ──────
 const TRACKER = fs.readFileSync(path.join(__dirname, 'public', 'nyx.js'), 'utf8');
 app.get('/nyx.js', (_req, res) => {
@@ -119,6 +134,8 @@ app.get('/nyx.js', (_req, res) => {
 function collect(req, res) {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type');
+  // flood / stat-poisoning guard: cap events per IP per minute (legit SPA bursts fit easily)
+  if (rateLimited('c:' + clientIp(req), 600, 60000)) return res.status(204).end();
   const b = req.method === 'GET' ? req.query : (req.body || {});
   const domain = norm(b.d || b.domain);
   if (!domain) return res.status(204).end();
@@ -142,11 +159,12 @@ function collect(req, res) {
   }
   const tz = String(b.tz || '').slice(0, 60) || null;
   const lang = String(b.l || b.lang || '').slice(0, 12).split(',')[0] || null;
+  const name = String(b.n || b.name || '').slice(0, 80).trim() || null; // custom event / goal
   const ip = clientIp(req);
   insEvent.run({
     site_id: site.id, ts, day, path: pth, source, referrer: referrer || null,
     country: countryFromTz(tz), tz, browser: ua.browser, os: ua.os, device: ua.device,
-    lang, vh: visitorHash(site.id, ip, req.headers['user-agent'] || '', day),
+    lang, name, vh: visitorHash(site.id, ip, req.headers['user-agent'] || '', day),
   });
   res.status(204).end();
 }
@@ -158,6 +176,7 @@ app.get('/api/collect', collect);
 const sessions = new Map();
 function newToken() { return crypto.randomBytes(24).toString('hex'); }
 app.post('/auth/login', (req, res) => {
+  if (rateLimited('login:' + clientIp(req), 10, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
   const pw = String((req.body && req.body.password) || '');
   const ok = pw.length === WEB_PASSWORD.length && crypto.timingSafeEqual(Buffer.from(pw), Buffer.from(WEB_PASSWORD));
   if (!ok) return res.status(401).json({ error: 'Wrong password' });
@@ -165,7 +184,14 @@ app.post('/auth/login', (req, res) => {
   sessions.set(token, { expires: Date.now() + 7 * 864e5 });
   res.json({ token });
 });
+function checkApiKey(req) {
+  if (!API_KEY) return false;
+  const hdr = String(req.headers['authorization'] || '');
+  const key = hdr.startsWith('Bearer ') ? hdr.slice(7) : String(req.headers['x-api-key'] || '');
+  return key.length === API_KEY.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(API_KEY));
+}
 function auth(req, res, next) {
+  if (checkApiKey(req)) return next(); // agents / CLI
   const t = req.headers['x-session-token'];
   const s = t && sessions.get(t);
   if (s && s.expires > Date.now()) return next();
@@ -174,19 +200,35 @@ function auth(req, res, next) {
 }
 
 // ── sites management ─────────────────────────────────────────────────────────
-app.get('/api/sites', auth, (_req, res) => res.json(allSites.all()));
-app.post('/api/sites', auth, (req, res) => {
+const sitesListHandler = (_req, res) => res.json(allSites.all());
+const sitesCreateHandler = (req, res) => {
   const domain = norm(req.body && req.body.domain);
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Enter a valid domain, e.g. example.com' });
   insSite.run(domain, (req.body && req.body.name) || domain, Date.now());
   res.json(getSiteByDomain.get(domain));
-});
+};
+app.get('/api/sites', auth, sitesListHandler);
+app.post('/api/sites', auth, sitesCreateHandler);
 app.delete('/api/sites/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
   res.json({ ok: true });
 });
+
+// ── /api/v1 — stable agent/CLI surface (Authorization: Bearer <API_KEY>) ──────
+app.get('/api/v1', (_req, res) => res.json({
+  name: 'Nyx Analytics API', version: '1',
+  auth: 'Authorization: Bearer <API_KEY>',
+  endpoints: {
+    'GET /api/v1/sites': 'list tracked sites',
+    'POST /api/v1/sites': 'add a site { domain }',
+    'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo)',
+    'GET /api/v1/realtime?site=': 'online count, last-30-min pulse + recent events',
+  },
+}));
+app.get('/api/v1/sites', auth, sitesListHandler);
+app.post('/api/v1/sites', auth, sitesCreateHandler);
 
 // ── stats ────────────────────────────────────────────────────────────────────
 const PERIODS = { today: 1, '7d': 7, '30d': 30, '90d': 90, '12mo': 365 };
@@ -198,13 +240,13 @@ function rangeFor(period) {
   else start = now - days * 864e5;
   return { start, end: now, days };
 }
-app.get('/api/stats', auth, (req, res) => {
+function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   const period = req.query.period || '7d';
   const { start, days } = rangeFor(period);
   const sid = site.id;
-  const where = 'site_id = ? AND ts >= ?';
+  const where = 'site_id = ? AND ts >= ? AND name IS NULL'; // pageviews only (custom events excluded)
   const args = [sid, start];
 
   const totals = db.prepare(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where}`).get(...args);
@@ -212,6 +254,10 @@ app.get('/api/stats', auth, (req, res) => {
   const bounceRow = db.prepare(`SELECT COUNT(*) AS bounced FROM (SELECT vh, COUNT(*) c FROM events WHERE ${where} GROUP BY vh HAVING c = 1)`).get(...args);
   const bounce = totals.visitors ? Math.round((bounceRow.bounced / totals.visitors) * 100) : 0;
   const viewsPerVisitor = totals.visitors ? +(totals.pageviews / totals.visitors).toFixed(1) : 0;
+  // trend vs the previous equal-length window
+  const len = Date.now() - start;
+  const prev = db.prepare('SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE site_id = ? AND name IS NULL AND ts >= ? AND ts < ?').get(sid, start - len, start);
+  const pct = (cur, was) => (was ? Math.round(((cur - was) / was) * 100) : null);
 
   // time series (per hour for today, else per day)
   let series;
@@ -237,10 +283,15 @@ app.get('/api/stats', auth, (req, res) => {
     `SELECT ${col} AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY visitors DESC, pageviews DESC LIMIT ${limit}`,
   ).all(...args);
 
+  const goals = db.prepare(
+    'SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 8',
+  ).all(sid, start);
+
   res.json({
     site: { domain: site.domain, name: site.name },
     period,
     totals: { visitors: totals.visitors, pageviews: totals.pageviews, bounce, viewsPerVisitor },
+    trend: { visitors: pct(totals.visitors, prev.visitors), pageviews: pct(totals.pageviews, prev.pageviews) },
     series,
     pages: topBy('path', 10),
     sources: topBy('source', 8),
@@ -249,9 +300,28 @@ app.get('/api/stats', auth, (req, res) => {
     os: topBy('os', 6),
     devices: topBy('device', 4),
     languages: topBy('lang', 6),
-    realtime: db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ?').get(sid, Date.now() - 5 * 60000).v,
+    goals,
+    realtime: db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, Date.now() - 5 * 60000).v,
   });
-});
+}
+app.get('/api/stats', auth, statsHandler);
+app.get('/api/v1/stats', auth, statsHandler);
+
+// ── realtime: live visitors + per-minute pulse + recent event feed (last 30 min) ──
+function realtimeHandler(req, res) {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  const sid = site.id, now = Date.now(), since = now - 30 * 60000;
+  const online = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, now - 5 * 60000).v;
+  const rows = db.prepare('SELECT CAST((ts/60000) AS INT) b, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ? GROUP BY b').all(sid, since);
+  const map = new Map(rows.map((r) => [r.b, r]));
+  const startB = Math.floor(since / 60000);
+  const minutes = Array.from({ length: 30 }, (_, i) => { const r = map.get(startB + i + 1); return { visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 }; });
+  const recent = db.prepare('SELECT ts, path, country, tz, browser, os, device, source, lang, name FROM events WHERE site_id = ? AND ts >= ? ORDER BY id DESC LIMIT 60').all(sid, since);
+  res.json({ online, minutes, recent, now });
+}
+app.get('/api/realtime', auth, realtimeHandler);
+app.get('/api/v1/realtime', auth, realtimeHandler);
 
 // ── static dashboard ─────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));

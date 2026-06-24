@@ -2,8 +2,11 @@
 (function () {
   var TOKEN = localStorage.getItem('nyx_token') || '';
   var state = { site: localStorage.getItem('nyx_site') || '', period: '7d', sites: [] };
+  var lastStats = null;
   var $ = function (id) { return document.getElementById(id); };
   var ORIGIN = location.origin;
+  // Escape any value that originates from visitor beacons before it touches innerHTML.
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   function api(path, opts) {
     opts = opts || {};
@@ -44,7 +47,7 @@
     return api('/api/sites').then(function (sites) {
       state.sites = sites;
       var sel = $('siteSelect');
-      sel.innerHTML = sites.map(function (s) { return '<option value="' + s.domain + '">' + s.domain + '</option>'; }).join('');
+      sel.innerHTML = sites.map(function (s) { return '<option value="' + esc(s.domain) + '">' + esc(s.domain) + '</option>'; }).join('');
       if (!sites.length) { sel.innerHTML = '<option>no sites yet</option>'; return; }
       if (!state.site || !sites.some(function (s) { return s.domain === state.site; })) state.site = sites[0].domain;
       sel.value = state.site;
@@ -74,6 +77,25 @@
     $('snippetCode').textContent = snippetFor(domain);
     $('snippetModal').classList.remove('hide');
   }
+  // ── CSV export of the current view ──
+  $('exportBtn').onclick = function () {
+    if (!lastStats) return;
+    var s = lastStats, rows = [['metric', 'name', 'visitors', 'pageviews']];
+    rows.push(['summary', 'visitors', s.totals.visitors, '']);
+    rows.push(['summary', 'pageviews', '', s.totals.pageviews]);
+    rows.push(['summary', 'bounce_rate', s.totals.bounce + '%', '']);
+    [['page', s.pages], ['source', s.sources], ['country', s.countries], ['browser', s.browsers], ['os', s.os], ['device', s.devices], ['goal', s.goals]].forEach(function (pair) {
+      (pair[1] || []).forEach(function (r) { rows.push([pair[0], r.name, r.visitors, r.pageviews]); });
+    });
+    var csv = rows.map(function (r) { return r.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'nyx-' + state.site + '-' + state.period + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   $('snippetBtn').onclick = function () { if (state.site) showSnippet(state.site); };
   $('closeSnippet').onclick = function () { $('snippetModal').classList.add('hide'); };
   $('copySnippet').onclick = function () {
@@ -81,6 +103,50 @@
       $('copySnippet').textContent = 'Copied ✓'; setTimeout(function () { $('copySnippet').textContent = 'Copy snippet'; }, 1500);
     });
   };
+
+  // ── live visitors (last 30 min) ──
+  var liveTimer = null;
+  function openLive() { if (!state.site || state.site === 'no sites yet') return; $('liveModal').classList.remove('hide'); fetchLive(); clearInterval(liveTimer); liveTimer = setInterval(fetchLive, 8000); }
+  function closeLive() { $('liveModal').classList.add('hide'); clearInterval(liveTimer); liveTimer = null; }
+  function fetchLive() {
+    if (document.hidden) return;
+    api('/api/realtime?site=' + encodeURIComponent(state.site)).then(function (r) {
+      if (r.error) return;
+      $('live-online').textContent = r.online;
+      renderSpark(r.minutes);
+      renderFeed(r.recent, r.now);
+    }).catch(function () {});
+  }
+  function renderSpark(minutes) {
+    var svg = $('live-spark'), W = 600, H = 70, n = minutes.length;
+    var max = Math.max.apply(null, minutes.map(function (m) { return m.pageviews; }).concat([1]));
+    var bw = W / n;
+    svg.innerHTML = minutes.map(function (m, i) {
+      var h = m.pageviews ? Math.max(3, Math.round((m.pageviews / max) * (H - 6))) : 0;
+      return '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (H - h) + '" width="' + (bw - 2).toFixed(1) + '" height="' + h + '" rx="2" fill="' + (i >= n - 5 ? '#e879a8' : 'rgba(168,85,247,.5)') + '"></rect>';
+    }).join('');
+  }
+  function timeAgo(ts, now) {
+    var s = Math.max(0, Math.round((now - ts) / 1000));
+    if (s < 8) return 'just now';
+    if (s < 60) return s + 's ago';
+    return Math.round(s / 60) + 'm ago';
+  }
+  function renderFeed(recent, now) {
+    var el = $('live-feed');
+    if (!recent || !recent.length) { el.innerHTML = '<div class="empty">No visitors in the last 30 minutes</div>'; return; }
+    el.innerHTML = recent.map(function (e) {
+      var loc = e.country ? flag(e.country) : '🌐';
+      var what = e.name ? '<span class="goal">🎯 ' + esc(e.name) + '</span>' : '<span class="path">' + esc(e.path) + '</span>';
+      var src = (e.source && e.source !== 'Direct') ? '↗ ' + e.source : '';
+      var meta = [e.browser, e.device, src].filter(Boolean).map(esc).join(' · ');
+      return '<div class="feed-row"><span class="fl" title="' + esc(e.country || e.tz || '') + '">' + loc + '</span>' +
+        '<div class="fw">' + what + '<span class="fm">' + meta + '</span></div>' +
+        '<span class="ft">' + timeAgo(e.ts, now) + '</span></div>';
+    }).join('');
+  }
+  $('realtimeBtn').onclick = openLive;
+  $('closeLive').onclick = closeLive;
 
   // ── periods ──
   Array.prototype.forEach.call(document.querySelectorAll('#periods button'), function (b) {
@@ -92,6 +158,13 @@
 
   // ── rendering ──
   function fmt(n) { n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }
+  function trend(id, p) {
+    var el = $(id);
+    if (p == null) { el.textContent = ''; el.className = 'trend'; return; }
+    var up = p >= 0;
+    el.textContent = (up ? '▲ ' : '▼ ') + Math.abs(p) + '%';
+    el.className = 'trend ' + (up ? 'up' : 'down');
+  }
 
   function bars(elId, rows, opts) {
     opts = opts || {};
@@ -102,7 +175,7 @@
       var label = opts.label ? opts.label(r) : (r.name || '—');
       var w = Math.max(3, Math.round(((r.visitors || 0) / max) * 100));
       return '<div class="bar"><div class="fill" style="width:' + w + '%"></div>' +
-        '<span class="name">' + label + '</span><span class="val">' + fmt(r.visitors) + '</span></div>';
+        '<span class="name">' + esc(label) + '</span><span class="val">' + fmt(r.visitors) + '</span></div>';
     }).join('');
   }
 
@@ -134,7 +207,7 @@
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
       rect.addEventListener('mousemove', function (e) {
         var d = series[+rect.dataset.i];
-        tip.innerHTML = '<strong>' + d.label + '</strong><br>🦞 ' + d.visitors + ' visitors<br>📄 ' + d.pageviews + ' views';
+        tip.innerHTML = '<strong>' + esc(d.label) + '</strong><br>🦞 ' + d.visitors + ' visitors<br>📄 ' + d.pageviews + ' views';
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
       rect.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
@@ -150,11 +223,14 @@
     }
     api('/api/stats?site=' + encodeURIComponent(state.site) + '&period=' + state.period).then(function (s) {
       if (s.error) return;
+      lastStats = s;
       $('s-visitors').textContent = fmt(s.totals.visitors);
       $('s-pageviews').textContent = fmt(s.totals.pageviews);
       $('s-bounce').textContent = s.totals.bounce + '%';
       $('s-vpv').textContent = s.totals.viewsPerVisitor;
       $('realtime').textContent = s.realtime;
+      trend('t-visitors', s.trend && s.trend.visitors);
+      trend('t-pageviews', s.trend && s.trend.pageviews);
       drawChart(s.series);
       bars('p-pages', s.pages, { label: function (r) { return r.name; } });
       bars('p-sources', s.sources, { label: function (r) { return r.name === 'Direct' ? '➜ Direct / none' : r.name; } });
@@ -162,18 +238,18 @@
       bars('p-browsers', s.browsers);
       bars('p-os', s.os);
       bars('p-devices', s.devices);
+      bars('p-goals', s.goals, { label: function (r) { return '🎯 ' + r.name; } });
     });
   }
 
   function boot() {
     hideLogin();
     loadSites().then(load);
+    // live dashboard: refresh every 15s while the tab is visible
     clearInterval(window.__rt);
     window.__rt = setInterval(function () {
       if (!state.site || document.hidden) return;
-      api('/api/stats?site=' + encodeURIComponent(state.site) + '&period=' + state.period).then(function (s) {
-        if (s && s.realtime != null) $('realtime').textContent = s.realtime;
-      }).catch(function () {});
+      load();
     }, 15000);
   }
 

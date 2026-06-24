@@ -4,11 +4,17 @@
   "description": "Nyx Analytics — privacy-first, cookieless web analytics in cosmic lobster style 🦞🌌",
   "main": "server.js",
   "type": "commonjs",
-  "scripts": { "start": "node server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "cli": "node cli.js"
+  },
   "author": "Nyx & Fabian",
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^12.10.0",
     "express": "^4.21.2"
+  },
+  "bin": {
+    "nyx": "cli.js"
   }
 }
