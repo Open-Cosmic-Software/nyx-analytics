@@ -32,7 +32,7 @@ A lightweight, cosmic-styled alternative to Google Analytics — one tiny script
 ## Quick start
 
 ```bash
-git clone https://github.com/fabudde/nyx-analytics.git
+git clone https://github.com/OCS-Open-Cosmic-Software/nyx-analytics.git
 cd nyx-analytics
 npm install
 cp .env.example .env     # set WEB_PASSWORD, SESSION_SECRET, INGEST_SALT, API_KEY
