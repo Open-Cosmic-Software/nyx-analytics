@@ -54,11 +54,18 @@
       <button data-p="90d">90 days</button>
       <button data-p="12mo">12 mo</button>
     </div>
-    <div style="display:flex;gap:8px">
+    <div class="toolbar-right">
+      <div class="range" id="range">
+        <input type="date" id="fromDate" title="From"><span class="arrow">→</span><input type="date" id="toDate" title="To">
+        <button class="btn ghost" id="applyRange">Apply</button>
+      </div>
       <button class="btn ghost" id="exportBtn">⬇ CSV</button>
       <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
     </div>
   </div>
+
+  <!-- active segmentation filters -->
+  <div id="filters" class="filters hide"></div>
 
   <div id="dash">
     <div class="stats">
@@ -66,6 +73,7 @@
       <div class="card stat"><div class="label">Pageviews</div><div class="value" id="s-pageviews">—</div><span class="trend" id="t-pageviews"></span></div>
       <div class="card stat"><div class="label">Bounce rate</div><div class="value" id="s-bounce">—</div></div>
       <div class="card stat"><div class="label">Views / visitor</div><div class="value" id="s-vpv">—</div></div>
+      <div class="card stat"><div class="label">Avg. visit time</div><div class="value" id="s-dur">—</div></div>
     </div>
 
     <div class="card chart-card">
@@ -80,14 +88,36 @@
     </div>
 
     <div class="panels">
-      <div class="card panel"><h3><span class="em">📄</span> Top pages</h3><div class="bars" id="p-pages"></div></div>
-      <div class="card panel"><h3><span class="em">🔗</span> Sources</h3><div class="bars" id="p-sources"></div></div>
+      <div class="card panel">
+        <h3><span class="em">📄</span> Pages
+          <span class="tabs" id="pageTabs">
+            <button data-t="pages" class="active">Top</button>
+            <button data-t="entryPages">Entry</button>
+            <button data-t="exitPages">Exit</button>
+          </span>
+        </h3>
+        <div class="bars" id="p-pages"></div>
+      </div>
+      <div class="card panel">
+        <h3><span class="em">🔗</span> Sources
+          <span class="tabs" id="srcTabs">
+            <button data-t="sources" class="active">Source</button>
+            <button data-t="mediums">Medium</button>
+            <button data-t="campaigns">Campaign</button>
+          </span>
+        </h3>
+        <div class="bars" id="p-sources"></div>
+      </div>
       <div class="card panel"><h3><span class="em">🌍</span> Locations</h3><div class="bars" id="p-countries"></div></div>
       <div class="card panel"><h3><span class="em">🧭</span> Browsers</h3><div class="bars" id="p-browsers"></div></div>
       <div class="card panel"><h3><span class="em">💻</span> OS</h3><div class="bars" id="p-os"></div></div>
       <div class="card panel"><h3><span class="em">📱</span> Devices</h3><div class="bars" id="p-devices"></div></div>
-      <div class="card panel"><h3><span class="em">🎯</span> Goals &amp; events</h3><div class="bars" id="p-goals"></div></div>
+      <div class="card panel"><h3><span class="em">🎯</span> Goals &amp; conversions</h3><div class="bars" id="p-goals"></div></div>
+      <div class="card panel"><h3><span class="em">🗣️</span> Languages</h3><div class="bars" id="p-languages"></div></div>
     </div>
+
+    <!-- custom-event properties (shown when drilled into a single goal) -->
+    <div id="propsWrap" class="panels hide" style="margin-top:16px"></div>
   </div>
 </div>
 
@@ -111,7 +141,7 @@
     <h2 class="grad-text">Embed code</h2>
     <p>Paste this once into the <code>&lt;head&gt;</code> of <strong id="snipDomain"></strong>.</p>
     <div class="snippet" id="snippetCode"></div>
-    <p class="muted" style="text-align:left;font-size:.78rem;margin:-2px 0 12px">Track goals from your code:<br><code style="color:var(--cyan)">nyx('Signup')</code> · <code style="color:var(--cyan)">nyx('Download')</code></p>
+    <p class="muted" style="text-align:left;font-size:.78rem;margin:-2px 0 12px">Track goals &amp; properties from your code:<br><code style="color:var(--cyan)">nyx('Signup')</code> · <code style="color:var(--cyan)">nyx('Signup', { plan: 'pro' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code style="color:var(--cyan)">data-honor-dnt</code> · <code style="color:var(--cyan)">data-track-outbound</code></span></p>
     <button class="btn" id="copySnippet">Copy snippet</button>
     <button class="btn ghost" id="closeSnippet" style="margin-top:10px">Close</button>
   </div>

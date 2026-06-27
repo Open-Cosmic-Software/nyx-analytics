@@ -25,6 +25,7 @@ const API_KEY = process.env.API_KEY || ''; // for agents / CLI (Bearer token)
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(16).toString('hex');
 const INGEST_SALT = process.env.INGEST_SALT || 'nyx-analytics-salt';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'analytics.db');
+const RETENTION_DAYS = parseInt(process.env.DATA_RETENTION_DAYS, 10) || 0; // 0 = keep forever; >0 purges older raw events (data minimisation)
 
 // ── DB ──────────────────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
@@ -57,15 +58,45 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_events_site_day ON events(site_id, day);
   CREATE INDEX IF NOT EXISTS idx_events_vh ON events(site_id, vh, day);
 `);
-// migration: custom-event name column (for installs created before goals existed)
-if (!db.prepare('PRAGMA table_info(events)').all().some((c) => c.name === 'name')) db.exec('ALTER TABLE events ADD COLUMN name TEXT');
+// additive migrations: each column is added once for installs created before it existed.
+function ensureColumn(name, decl) {
+  if (!db.prepare('PRAGMA table_info(events)').all().some((c) => c.name === name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${decl}`);
+}
+ensureColumn('name', 'TEXT'); // custom-event / goal name
+ensureColumn('utm_medium', 'TEXT'); // campaign medium (utm_medium)
+ensureColumn('utm_campaign', 'TEXT'); // campaign name (utm_campaign)
+ensureColumn('dur', 'INTEGER'); // engagement seconds (set by a follow-up beacon on page leave)
+ensureColumn('props', 'TEXT'); // custom event properties, JSON object as text
 
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
 const insSite = db.prepare('INSERT OR IGNORE INTO sites (domain, name, created) VALUES (?, ?, ?)');
 const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
-const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, vh)
-  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @vh)`);
+const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, utm_medium, utm_campaign, dur, props, vh)
+  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @utm_medium, @utm_campaign, @dur, @props, @vh)`);
+// engagement: attach a visit duration (seconds) to the visitor's most recent pageview for that path.
+const updDur = db.prepare(`UPDATE events SET dur = @dur WHERE id = (
+  SELECT id FROM events WHERE site_id = @site_id AND vh = @vh AND name IS NULL AND path = @path AND ts >= @since
+  ORDER BY id DESC LIMIT 1) AND (dur IS NULL OR dur < @dur)`);
+
+// Custom event properties stay developer-defined and small — never a place for PII to pile up.
+function sanitizeProps(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  let n = 0;
+  for (const k of Object.keys(raw)) {
+    if (n++ >= 12) break; // cap key count
+    const key = String(k).slice(0, 40).trim();
+    if (!key) continue;
+    const v = raw[k];
+    if (v == null || typeof v === 'object') continue; // scalars only
+    out[key] = String(v).slice(0, 80);
+  }
+  const keys = Object.keys(out);
+  if (!keys.length) return null;
+  const json = JSON.stringify(out);
+  return json.length > 800 ? null : json; // hard cap on total size
+}
 
 // ── UA parsing + bot filter ─────────────────────────────────────────────────
 const BOT_RE = /bot|crawl|spider|slurp|bing|google|yandex|baidu|duckduck|facebookexternal|embedly|quora|pinterest|slackbot|telegrambot|whatsapp|twitter|discordbot|preview|monitor|uptime|pingdom|lighthouse|headless|phantom|curl|wget|python-requests|axios|node-fetch|go-http/i;
@@ -149,6 +180,16 @@ function collect(req, res) {
   let pth = String(b.p || b.path || '/').slice(0, 512);
   try { pth = decodeURI(pth); } catch {}
   if (pth.length > 1) pth = pth.replace(/\/+$/, '') || '/';
+  const ip = clientIp(req);
+  const vh = visitorHash(site.id, ip, req.headers['user-agent'] || '', day);
+
+  // engagement beacon: attach a visit duration to the visitor's latest pageview (no new row).
+  if (b.e === 'engagement') {
+    const dur = Math.max(0, Math.min(7200, parseInt(b.dur, 10) || 0)); // cap at 2h
+    if (dur > 0) updDur.run({ site_id: site.id, vh, path: pth, dur, since: ts - 6 * 3600000 });
+    return res.status(204).end();
+  }
+
   // referrer → source host
   let referrer = String(b.r || b.referrer || '').slice(0, 512);
   let source = 'Direct';
@@ -157,14 +198,16 @@ function collect(req, res) {
   else if (referrer) {
     try { const h = norm(new URL(referrer).hostname); if (h && h !== domain) source = h; } catch {}
   }
+  const utmMedium = String(b.um || b.utm_medium || '').slice(0, 60).trim() || null;
+  const utmCampaign = String(b.uc || b.utm_campaign || '').slice(0, 80).trim() || null;
   const tz = String(b.tz || '').slice(0, 60) || null;
   const lang = String(b.l || b.lang || '').slice(0, 12).split(',')[0] || null;
   const name = String(b.n || b.name || '').slice(0, 80).trim() || null; // custom event / goal
-  const ip = clientIp(req);
+  const props = name ? sanitizeProps(b.pr) : null; // properties only attach to named events
   insEvent.run({
     site_id: site.id, ts, day, path: pth, source, referrer: referrer || null,
     country: countryFromTz(tz), tz, browser: ua.browser, os: ua.os, device: ua.device,
-    lang, name, vh: visitorHash(site.id, ip, req.headers['user-agent'] || '', day),
+    lang, name, utm_medium: utmMedium, utm_campaign: utmCampaign, dur: null, props, vh,
   });
   res.status(204).end();
 }
@@ -230,45 +273,76 @@ app.get('/api/v1', (_req, res) => res.json({
   endpoints: {
     'GET /api/v1/sites': 'list tracked sites',
     'POST /api/v1/sites': 'add a site { domain }',
-    'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo)',
+    'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo, or from=YYYY-MM-DD&to=YYYY-MM-DD)',
     'GET /api/v1/realtime?site=': 'online count, last-30-min pulse + recent events',
   },
+  filters: 'add any of country,source,page,browser,os,device,lang,medium,campaign,goal to /stats to segment',
 }));
 app.get('/api/v1/sites', auth, sitesListHandler);
 app.post('/api/v1/sites', auth, sitesCreateHandler);
 
 // ── stats ────────────────────────────────────────────────────────────────────
 const PERIODS = { today: 1, '7d': 7, '30d': 30, '90d': 90, '12mo': 365 };
-function rangeFor(period) {
-  const days = PERIODS[period] || 7;
+function rangeFor(query) {
   const now = Date.now();
-  let start;
-  if (period === 'today') start = new Date(new Date(now).toISOString().slice(0, 10)).getTime();
-  else start = now - days * 864e5;
-  return { start, end: now, days };
+  // custom range: from/to are YYYY-MM-DD (inclusive)
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from || '') ? Date.parse(query.from + 'T00:00:00Z') : null;
+  if (from != null && !Number.isNaN(from)) {
+    const toRaw = /^\d{4}-\d{2}-\d{2}$/.test(query.to || '') ? Date.parse(query.to + 'T00:00:00Z') : from;
+    const end = Math.min(now, (Number.isNaN(toRaw) ? from : toRaw) + 864e5); // inclusive end day
+    const days = Math.max(1, Math.round((end - from) / 864e5));
+    return { start: from, end, days, period: 'custom', hourly: days <= 1 };
+  }
+  const period = PERIODS[query.period] ? query.period : '7d';
+  const days = PERIODS[period];
+  const start = period === 'today' ? new Date(new Date(now).toISOString().slice(0, 10)).getTime() : now - days * 864e5;
+  return { start, end: now, days, period, hourly: period === 'today' };
 }
+
+// Whitelisted segmentation filters — click any breakdown row in the dashboard to drill in.
+// Every value is bound as a parameter; only these exact column names are ever interpolated.
+const FILTER_COLS = { country: 'country', source: 'source', page: 'path', browser: 'browser', os: 'os', device: 'device', lang: 'lang', medium: 'utm_medium', campaign: 'utm_campaign' };
+function buildFilters(query) {
+  const clauses = [], params = [];
+  for (const key of Object.keys(FILTER_COLS)) {
+    const v = query[key];
+    if (v != null && v !== '') { clauses.push(`${FILTER_COLS[key]} = ?`); params.push(String(v).slice(0, 200)); }
+  }
+  const goal = query.goal != null && query.goal !== '' ? String(query.goal).slice(0, 80) : null;
+  return { clauses, params, goal };
+}
+
 function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
-  const period = req.query.period || '7d';
-  const { start, days } = rangeFor(period);
   const sid = site.id;
-  const where = 'site_id = ? AND ts >= ? AND name IS NULL'; // pageviews only (custom events excluded)
-  const args = [sid, start];
+  const { start, end, days, period, hourly } = rangeFor(req.query);
+  const { clauses, params, goal } = buildFilters(req.query);
+
+  // pageview WHERE = time window + segmentation filters. A goal filter narrows the visitor
+  // set to those who fired that event in-range (so every breakdown reflects converters only).
+  let where = 'site_id = ? AND ts >= ? AND ts < ? AND name IS NULL';
+  const args = [sid, start, end, ...params];
+  if (clauses.length) where += ' AND ' + clauses.join(' AND ');
+  if (goal) { where += ' AND vh IN (SELECT vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = ?)'; args.push(sid, start, end, goal); }
 
   const totals = db.prepare(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where}`).get(...args);
-  // bounce: visitors with exactly 1 pageview in the range
   const bounceRow = db.prepare(`SELECT COUNT(*) AS bounced FROM (SELECT vh, COUNT(*) c FROM events WHERE ${where} GROUP BY vh HAVING c = 1)`).get(...args);
   const bounce = totals.visitors ? Math.round((bounceRow.bounced / totals.visitors) * 100) : 0;
   const viewsPerVisitor = totals.visitors ? +(totals.pageviews / totals.visitors).toFixed(1) : 0;
-  // trend vs the previous equal-length window
-  const len = Date.now() - start;
-  const prev = db.prepare('SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE site_id = ? AND name IS NULL AND ts >= ? AND ts < ?').get(sid, start - len, start);
+  const durRow = db.prepare(`SELECT AVG(dur) d FROM events WHERE ${where} AND dur IS NOT NULL`).get(...args);
+  const duration = durRow && durRow.d != null ? Math.round(durRow.d) : null; // avg engaged seconds
+
+  // trend vs the previous equal-length window (same filters)
+  const len = end - start;
+  const prevArgs = args.slice(); prevArgs[1] = start - len; prevArgs[2] = start;
+  if (goal) { prevArgs[prevArgs.length - 3] = start - len; prevArgs[prevArgs.length - 2] = start; }
+  const prev = db.prepare(`SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE ${where}`).get(...prevArgs);
   const pct = (cur, was) => (was ? Math.round(((cur - was) / was) * 100) : null);
 
-  // time series (per hour for today, else per day)
+  // time series (per hour for a single day, else per day)
   let series;
-  if (period === 'today') {
+  if (hourly) {
     const rows = db.prepare(`SELECT CAST((ts/3600000) AS INT) AS bucket, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY bucket`).all(...args);
     const map = new Map(rows.map((r) => [r.bucket, r]));
     const startH = Math.floor(start / 3600000);
@@ -280,7 +354,7 @@ function statsHandler(req, res) {
     const rows = db.prepare(`SELECT day, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY day`).all(...args);
     const map = new Map(rows.map((r) => [r.day, r]));
     series = Array.from({ length: days }, (_, i) => {
-      const d = new Date(Date.now() - (days - 1 - i) * 864e5).toISOString().slice(0, 10);
+      const d = new Date(start + i * 864e5).toISOString().slice(0, 10);
       const r = map.get(d);
       return { label: d.slice(5), day: d, visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 };
     });
@@ -290,24 +364,58 @@ function statsHandler(req, res) {
     `SELECT ${col} AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY visitors DESC, pageviews DESC LIMIT ${limit}`,
   ).all(...args);
 
-  const goals = db.prepare(
-    'SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 8',
-  ).all(sid, start);
+  // entry / exit pages: first / last pageview of each visit (vh,day), counted as visits.
+  const edge = (dir, limit = 8) => db.prepare(
+    `SELECT path AS name, COUNT(*) AS visitors, COUNT(*) AS pageviews FROM (
+       SELECT path, ROW_NUMBER() OVER (PARTITION BY vh, day ORDER BY ts ${dir}, id ${dir}) rn FROM events WHERE ${where}
+     ) WHERE rn = 1 GROUP BY path ORDER BY visitors DESC LIMIT ${limit}`,
+  ).all(...args);
+
+  // goals: conversion = unique converters / unique visitors in the (filtered) range.
+  const goalRows = db.prepare(
+    `SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 12`,
+  ).all(sid, start, end);
+  const goals = goalRows.map((g) => ({ ...g, cr: totals.visitors ? +((g.visitors / totals.visitors) * 100).toFixed(1) : 0 }));
+
+  // properties: only meaningful when drilled into a single goal — top values per property key.
+  let properties = null;
+  if (goal) {
+    const rows = db.prepare(`SELECT props FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = ? AND props IS NOT NULL`).all(sid, start, end, goal);
+    const byKey = {};
+    for (const r of rows) {
+      let obj; try { obj = JSON.parse(r.props); } catch { continue; }
+      for (const k of Object.keys(obj || {})) {
+        (byKey[k] || (byKey[k] = {}));
+        const val = String(obj[k]);
+        byKey[k][val] = (byKey[k][val] || 0) + 1;
+      }
+    }
+    properties = Object.keys(byKey).map((k) => ({
+      key: k,
+      values: Object.entries(byKey[k]).map(([name, pageviews]) => ({ name, pageviews, visitors: pageviews })).sort((a, b) => b.pageviews - a.pageviews).slice(0, 8),
+    }));
+  }
 
   res.json({
     site: { domain: site.domain, name: site.name },
-    period,
-    totals: { visitors: totals.visitors, pageviews: totals.pageviews, bounce, viewsPerVisitor },
+    period, range: { from: new Date(start).toISOString().slice(0, 10), to: new Date(end - 1).toISOString().slice(0, 10) },
+    filters: Object.assign({}, ...Object.keys(FILTER_COLS).filter((k) => req.query[k]).map((k) => ({ [k]: req.query[k] })), goal ? { goal } : {}),
+    totals: { visitors: totals.visitors, pageviews: totals.pageviews, bounce, viewsPerVisitor, duration },
     trend: { visitors: pct(totals.visitors, prev.visitors), pageviews: pct(totals.pageviews, prev.pageviews) },
     series,
     pages: topBy('path', 10),
+    entryPages: edge('ASC', 8),
+    exitPages: edge('DESC', 8),
     sources: topBy('source', 8),
+    mediums: topBy('utm_medium', 8),
+    campaigns: topBy('utm_campaign', 8),
     countries: topBy('country', 8),
     browsers: topBy('browser', 6),
     os: topBy('os', 6),
     devices: topBy('device', 4),
     languages: topBy('lang', 6),
     goals,
+    properties,
     realtime: db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, Date.now() - 5 * 60000).v,
   });
 }
@@ -334,4 +442,16 @@ app.get('/api/v1/realtime', auth, realtimeHandler);
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}`));
+// ── data retention (privacy by design: minimise what we keep) ─────────────────
+// When DATA_RETENTION_DAYS > 0, raw events older than the window are purged daily.
+// Aggregates you've already exported stay yours; the raw rows simply don't linger.
+const delOld = db.prepare('DELETE FROM events WHERE ts < ?');
+function purgeOld() {
+  if (RETENTION_DAYS <= 0) return;
+  const cutoff = Date.now() - RETENTION_DAYS * 864e5;
+  const info = delOld.run(cutoff);
+  if (info.changes) console.log(`Nyx Analytics 🦞 retention: purged ${info.changes} events older than ${RETENTION_DAYS}d`);
+}
+if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
+
+app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}`));

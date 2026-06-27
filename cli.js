@@ -19,6 +19,11 @@ const JSON_OUT = args.includes('--json');
 const WATCH = args.includes('--watch');
 const pos = args.filter((a) => !a.startsWith('--'));
 const cmd = pos[0];
+// --key=value flags → extra query params (filters: country,source,page,browser,os,device,lang,medium,campaign,goal · range: from,to)
+const flags = {};
+args.filter((a) => a.startsWith('--') && a.includes('=')).forEach((a) => { const i = a.indexOf('='); flags[a.slice(2, i)] = a.slice(i + 1); });
+function extraQuery() { return Object.keys(flags).filter((k) => k !== 'json' && k !== 'watch').map((k) => '&' + encodeURIComponent(k) + '=' + encodeURIComponent(flags[k])).join(''); }
+const fmtDur = (s) => (s == null ? '—' : s < 60 ? s + 's' : Math.floor(s / 60) + 'm' + (s % 60 ? ' ' + (s % 60) + 's' : ''));
 
 // ── tiny ANSI helpers ──
 const C = process.stdout.isTTY && !JSON_OUT;
@@ -66,21 +71,31 @@ async function cmdSites() {
 }
 
 async function cmdStats() {
-  const domain = pos[1] || die('Usage: nyx stats <domain> [period]');
+  const domain = pos[1] || die('Usage: nyx stats <domain> [period] [--country=DE] [--from=YYYY-MM-DD --to=YYYY-MM-DD]');
   const period = pos[2] || '7d';
-  const s = await api(`/api/v1/stats?site=${encodeURIComponent(domain)}&period=${period}`);
+  const range = flags.from && flags.to ? '' : `&period=${period}`;
+  const s = await api(`/api/v1/stats?site=${encodeURIComponent(domain)}${range}${extraQuery()}`);
   if (JSON_OUT) return console.log(JSON.stringify(s, null, 2));
   const t = s.totals, tr = s.trend || {};
   const trend = (v) => (v == null ? '' : ' ' + (v >= 0 ? green('▲' + v + '%') : red('▼' + Math.abs(v) + '%')));
-  banner(`${domain}  ·  ${period}`);
-  console.log('  ' + pad('Visitors', 14) + bold(t.visitors) + trend(tr.visitors));
-  console.log('  ' + pad('Pageviews', 14) + bold(t.pageviews) + trend(tr.pageviews));
-  console.log('  ' + pad('Bounce', 14) + bold(t.bounce + '%'));
-  console.log('  ' + pad('Views/visitor', 14) + bold(t.viewsPerVisitor));
+  const label = s.range ? `${s.range.from} → ${s.range.to}` : period;
+  banner(`${domain}  ·  ${label}`);
+  const active = Object.keys(s.filters || {});
+  if (active.length) console.log('  ' + dim('filtered by ' + active.map((k) => k + '=' + s.filters[k]).join(', ')));
+  console.log('  ' + pad('Visitors', 16) + bold(t.visitors) + trend(tr.visitors));
+  console.log('  ' + pad('Pageviews', 16) + bold(t.pageviews) + trend(tr.pageviews));
+  console.log('  ' + pad('Bounce', 16) + bold(t.bounce + '%'));
+  console.log('  ' + pad('Views/visitor', 16) + bold(t.viewsPerVisitor));
+  console.log('  ' + pad('Avg. visit time', 16) + bold(fmtDur(t.duration)));
   console.log('\n' + dim('  Top pages')); console.log(bar(s.pages, 'visitors'));
+  if (s.entryPages && s.entryPages.length) { console.log('\n' + dim('  Entry pages')); console.log(bar(s.entryPages, 'visitors')); }
   console.log('\n' + dim('  Sources')); console.log(bar(s.sources, 'visitors'));
+  if (s.campaigns && s.campaigns.length) { console.log('\n' + dim('  Campaigns')); console.log(bar(s.campaigns, 'visitors')); }
   console.log('\n' + dim('  Locations')); console.log(bar((s.countries || []).map((r) => ({ name: flag(r.name) + ' ' + r.name, visitors: r.visitors })), 'visitors'));
-  if (s.goals && s.goals.length) { console.log('\n' + dim('  Goals')); console.log(bar(s.goals, 'visitors')); }
+  if (s.goals && s.goals.length) {
+    console.log('\n' + dim('  Goals  ' + dim('(conversion)')));
+    console.log(bar(s.goals.map((g) => ({ name: g.name + dim('  ' + (g.cr != null ? g.cr + '%' : '')), visitors: g.visitors })), 'visitors'));
+  }
 }
 
 async function renderLive(domain) {
@@ -128,6 +143,10 @@ ${bold('Usage')}  nyx <command> [--json] [--watch]
   ${cyan('stats')} <domain> [period]   key metrics + breakdowns (today|7d|30d|90d|12mo)
   ${cyan('live')} <domain> [--watch]   online visitors + last-30-min feed
   ${cyan('add')} <domain>              add a site, print the embed snippet
+
+${bold('Segment & range')} (on stats)
+  ${dim('--country=DE --source=… --page=… --browser=… --medium=… --campaign=… --goal=…')}
+  ${dim('--from=2026-01-01 --to=2026-01-31')}   custom date range
 
 ${bold('Config')} (env)
   NYX_URL       ${dim(URL_BASE)}

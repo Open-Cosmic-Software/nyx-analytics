@@ -1,8 +1,22 @@
 /* Nyx Analytics dashboard 🦞 */
 (function () {
   var TOKEN = localStorage.getItem('nyx_token') || '';
-  var state = { site: localStorage.getItem('nyx_site') || '', period: '7d', sites: [] };
+  var state = { site: localStorage.getItem('nyx_site') || '', period: '7d', from: '', to: '', sites: [], filters: {}, srcTab: 'sources', pageTab: 'pages' };
   var lastStats = null;
+  // dashboard segmentation filters (whitelist mirrors the server's FILTER_COLS + goal)
+  var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', goal: 'Goal' };
+
+  // build the stats/realtime query string from the current site, period/range and active filters
+  function statsQuery() {
+    var q = 'site=' + encodeURIComponent(state.site);
+    if (state.from && state.to) q += '&from=' + state.from + '&to=' + state.to;
+    else q += '&period=' + state.period;
+    Object.keys(state.filters).forEach(function (k) { q += '&' + k + '=' + encodeURIComponent(state.filters[k]); });
+    return q;
+  }
+  function setFilter(key, value) { if (!value || value === 'Direct') return; state.filters[key] = value; load(); }
+  function removeFilter(key) { delete state.filters[key]; load(); }
+  function clearFilters() { state.filters = {}; load(); }
   var $ = function (id) { return document.getElementById(id); };
   var ORIGIN = location.origin;
   // Escape any value that originates from visitor beacons before it touches innerHTML.
@@ -84,7 +98,8 @@
     rows.push(['summary', 'visitors', s.totals.visitors, '']);
     rows.push(['summary', 'pageviews', '', s.totals.pageviews]);
     rows.push(['summary', 'bounce_rate', s.totals.bounce + '%', '']);
-    [['page', s.pages], ['source', s.sources], ['country', s.countries], ['browser', s.browsers], ['os', s.os], ['device', s.devices], ['goal', s.goals]].forEach(function (pair) {
+    rows.push(['summary', 'avg_visit_seconds', s.totals.duration == null ? '' : s.totals.duration, '']);
+    [['page', s.pages], ['entry_page', s.entryPages], ['exit_page', s.exitPages], ['source', s.sources], ['medium', s.mediums], ['campaign', s.campaigns], ['country', s.countries], ['browser', s.browsers], ['os', s.os], ['device', s.devices], ['language', s.languages], ['goal', s.goals]].forEach(function (pair) {
       (pair[1] || []).forEach(function (r) { rows.push([pair[0], r.name, r.visitors, r.pageviews]); });
     });
     var csv = rows.map(function (r) { return r.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
@@ -152,9 +167,33 @@
   Array.prototype.forEach.call(document.querySelectorAll('#periods button'), function (b) {
     b.onclick = function () {
       document.querySelectorAll('#periods button').forEach(function (x) { x.classList.remove('active'); });
-      b.classList.add('active'); state.period = b.dataset.p; load();
+      b.classList.add('active'); state.period = b.dataset.p;
+      state.from = ''; state.to = ''; $('fromDate').value = ''; $('toDate').value = ''; // clear custom range
+      load();
     };
   });
+
+  // ── custom date range ──
+  $('applyRange').onclick = function () {
+    var f = $('fromDate').value, t = $('toDate').value;
+    if (!f || !t) return;
+    if (f > t) { var tmp = f; f = t; t = tmp; $('fromDate').value = f; $('toDate').value = t; }
+    state.from = f; state.to = t;
+    document.querySelectorAll('#periods button').forEach(function (x) { x.classList.remove('active'); });
+    load();
+  };
+
+  // ── panel tabs (Pages + Sources) ──
+  function wireTabs(id, key, rerender) {
+    Array.prototype.forEach.call(document.querySelectorAll('#' + id + ' button'), function (b) {
+      b.onclick = function () {
+        document.querySelectorAll('#' + id + ' button').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active'); state[key] = b.dataset.t; rerender();
+      };
+    });
+  }
+  wireTabs('pageTabs', 'pageTab', renderPagesPanel);
+  wireTabs('srcTabs', 'srcTab', renderSourcesPanel);
 
   // ── rendering ──
   function fmt(n) { n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }
@@ -171,12 +210,45 @@
     var el = $(elId);
     if (!rows || !rows.length) { el.innerHTML = '<div class="empty">No data yet</div>'; return; }
     var max = Math.max.apply(null, rows.map(function (r) { return r.visitors || 0; })) || 1;
+    var fk = opts.filterKey; // when set, clicking a row drills into that segment
     el.innerHTML = rows.map(function (r) {
       var label = opts.label ? opts.label(r) : (r.name || '—');
       var w = Math.max(3, Math.round(((r.visitors || 0) / max) * 100));
-      return '<div class="bar"><div class="fill" style="width:' + w + '%"></div>' +
-        '<span class="name">' + esc(label) + '</span><span class="val">' + fmt(r.visitors) + '</span></div>';
+      var val = opts.value ? opts.value(r) : r.name;
+      var clickable = fk && val && val !== 'Direct';
+      var cr = opts.cr && r.cr != null ? '<span class="cr">' + r.cr + '%</span>' : '';
+      return '<div class="bar' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-fk="' + esc(fk) + '" data-fv="' + esc(val) + '"' : '') + ' title="' + esc(label) + '">' +
+        '<div class="fill" style="width:' + w + '%"></div>' +
+        '<span class="name">' + esc(label) + '</span><span class="val">' + fmt(r.visitors) + cr + '</span></div>';
     }).join('');
+    if (fk) Array.prototype.forEach.call(el.querySelectorAll('.bar.clickable'), function (b) {
+      b.onclick = function () { setFilter(b.getAttribute('data-fk'), b.getAttribute('data-fv')); };
+    });
+  }
+
+  // seconds → "1m 23s" / "45s"
+  function fmtDur(s) {
+    if (s == null) return '—';
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60), r = s % 60;
+    return m + 'm' + (r ? ' ' + r + 's' : '');
+  }
+
+  // ── segmentation filter chips ──
+  function renderFilters() {
+    var el = $('filters');
+    var keys = Object.keys(state.filters);
+    if (!keys.length) { el.classList.add('hide'); el.innerHTML = ''; return; }
+    el.classList.remove('hide');
+    var chips = keys.map(function (k) {
+      var v = state.filters[k];
+      var disp = k === 'country' ? (flag(v) + ' ' + (NAMES[v] || v)) : v;
+      return '<span class="chip"><span class="k">' + esc(FILTER_LABELS[k] || k) + '</span>' + esc(disp) +
+        '<button data-rm="' + esc(k) + '" title="Remove">✕</button></span>';
+    }).join('');
+    el.innerHTML = '<span class="flabel">Filtered by</span>' + chips + '<span class="chip clear" id="clearFilters">Clear all</span>';
+    Array.prototype.forEach.call(el.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { removeFilter(b.getAttribute('data-rm')); }; });
+    var ce = $('clearFilters'); if (ce) ce.onclick = clearFilters;
   }
 
   function drawChart(series) {
@@ -214,31 +286,61 @@
     });
   }
 
+  // ── tab-aware panels (Pages: Top/Entry/Exit · Sources: Source/Medium/Campaign) ──
+  function renderPagesPanel() {
+    var s = lastStats; if (!s) return;
+    bars('p-pages', s[state.pageTab] || s.pages, { filterKey: 'page', label: function (r) { return r.name; } });
+  }
+  function renderSourcesPanel() {
+    var s = lastStats; if (!s) return;
+    var tab = state.srcTab, fk = tab === 'mediums' ? 'medium' : tab === 'campaigns' ? 'campaign' : 'source';
+    bars('p-sources', s[tab] || [], { filterKey: fk, label: function (r) { return tab === 'sources' && r.name === 'Direct' ? '➜ Direct / none' : r.name; } });
+  }
+  function renderProps(s) {
+    var wrap = $('propsWrap');
+    if (!s.properties || !s.properties.length) { wrap.classList.add('hide'); wrap.innerHTML = ''; return; }
+    wrap.classList.remove('hide');
+    wrap.innerHTML = s.properties.map(function (p) {
+      var rows = p.values.map(function (v) {
+        var max = Math.max.apply(null, p.values.map(function (x) { return x.visitors || 0; })) || 1;
+        var w = Math.max(3, Math.round(((v.visitors || 0) / max) * 100));
+        return '<div class="bar"><div class="fill" style="width:' + w + '%"></div><span class="name">' + esc(v.name) + '</span><span class="val">' + fmt(v.visitors) + '</span></div>';
+      }).join('');
+      return '<div class="card panel"><h3><span class="em">🏷️</span> ' + esc(p.key) + '</h3><div class="bars">' + rows + '</div></div>';
+    }).join('');
+  }
+
   function load() {
+    var emptyMetrics = ['s-visitors', 's-pageviews', 's-bounce', 's-vpv', 's-dur'];
+    var emptyPanels = ['p-pages', 'p-sources', 'p-countries', 'p-browsers', 'p-os', 'p-devices', 'p-goals', 'p-languages'];
     if (!state.site || state.site === 'no sites yet') {
-      ['s-visitors', 's-pageviews', 's-bounce', 's-vpv'].forEach(function (id) { $(id).textContent = '—'; });
-      ['p-pages', 'p-sources', 'p-countries', 'p-browsers', 'p-os', 'p-devices'].forEach(function (id) { $(id).innerHTML = '<div class="empty">Add a site to begin</div>'; });
+      emptyMetrics.forEach(function (id) { $(id).textContent = '—'; });
+      emptyPanels.forEach(function (id) { $(id).innerHTML = '<div class="empty">Add a site to begin</div>'; });
       $('chart').innerHTML = '';
       return;
     }
-    api('/api/stats?site=' + encodeURIComponent(state.site) + '&period=' + state.period).then(function (s) {
+    renderFilters();
+    api('/api/stats?' + statsQuery()).then(function (s) {
       if (s.error) return;
       lastStats = s;
       $('s-visitors').textContent = fmt(s.totals.visitors);
       $('s-pageviews').textContent = fmt(s.totals.pageviews);
       $('s-bounce').textContent = s.totals.bounce + '%';
       $('s-vpv').textContent = s.totals.viewsPerVisitor;
+      $('s-dur').textContent = fmtDur(s.totals.duration);
       $('realtime').textContent = s.realtime;
       trend('t-visitors', s.trend && s.trend.visitors);
       trend('t-pageviews', s.trend && s.trend.pageviews);
       drawChart(s.series);
-      bars('p-pages', s.pages, { label: function (r) { return r.name; } });
-      bars('p-sources', s.sources, { label: function (r) { return r.name === 'Direct' ? '➜ Direct / none' : r.name; } });
-      bars('p-countries', s.countries, { label: function (r) { return flag(r.name) + ' ' + (NAMES[r.name] || r.name); } });
-      bars('p-browsers', s.browsers);
-      bars('p-os', s.os);
-      bars('p-devices', s.devices);
-      bars('p-goals', s.goals, { label: function (r) { return '🎯 ' + r.name; } });
+      renderPagesPanel();
+      renderSourcesPanel();
+      bars('p-countries', s.countries, { filterKey: 'country', label: function (r) { return flag(r.name) + ' ' + (NAMES[r.name] || r.name); } });
+      bars('p-browsers', s.browsers, { filterKey: 'browser' });
+      bars('p-os', s.os, { filterKey: 'os' });
+      bars('p-devices', s.devices, { filterKey: 'device' });
+      bars('p-languages', s.languages, { filterKey: 'lang' });
+      bars('p-goals', s.goals, { filterKey: 'goal', cr: true, label: function (r) { return '🎯 ' + r.name; } });
+      renderProps(s);
     });
   }
 
