@@ -2,6 +2,15 @@
 (function () {
   var TOKEN = localStorage.getItem('nyx_token') || '';
   var state = { site: localStorage.getItem('nyx_site') || '', period: '7d', from: '', to: '', sites: [], filters: {}, srcTab: 'sources', pageTab: 'pages' };
+  // which chart series are visible (toggled via the legend)
+  state.show = { visitors: true, pageviews: true };
+  try {
+    var savedShow = JSON.parse(localStorage.getItem('nyx_show') || 'null');
+    // Never allow both off — an empty chart looks like broken data, not like a choice.
+    if (savedShow && (savedShow.visitors || savedShow.pageviews)) {
+      state.show = { visitors: !!savedShow.visitors, pageviews: !!savedShow.pageviews };
+    }
+  } catch (e) { /* corrupt value → keep both visible */ }
   var lastStats = null;
   // dashboard segmentation filters (whitelist mirrors the server's FILTER_COLS + goal)
   var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', goal: 'Goal' };
@@ -253,7 +262,11 @@
 
   function drawChart(series) {
     var svg = $('chart'); var W = 800, H = 220, pad = 8;
-    var max = Math.max(1, Math.max.apply(null, series.map(function (d) { return Math.max(d.pageviews, d.visitors); })));
+    var showV = state.show.visitors, showP = state.show.pageviews;
+    // Only visible series define the scale — otherwise hiding a line would not zoom in.
+    var max = Math.max(1, Math.max.apply(null, series.map(function (d) {
+      return Math.max(showV ? d.visitors : 0, showP ? d.pageviews : 0);
+    })));
     var n = series.length;
     var x = function (i) { return pad + (i * (W - 2 * pad)) / Math.max(1, n - 1); };
     var y = function (v) { return H - pad - (v / max) * (H - 2 * pad); };
@@ -270,16 +283,18 @@
       '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">' +
       '<stop offset="0%" stop-color="#e879a8" stop-opacity="0.35"/><stop offset="100%" stop-color="#e879a8" stop-opacity="0"/>' +
       '</linearGradient></defs>' +
-      '<path d="' + areaP + '" fill="url(#ag)"/>' +
-      '<path d="' + path('pageviews') + '" fill="none" stroke="#67e8f9" stroke-width="2" opacity="0.85"/>' +
-      '<path d="' + path('visitors') + '" fill="none" stroke="#e879a8" stroke-width="2.5"/>' +
-      series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.5" fill="#e879a8"/>'; }).join('') +
+      (showV ? '<path d="' + areaP + '" fill="url(#ag)"/>' : '') +
+      (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="#67e8f9" stroke-width="2" opacity="0.85"/>' : '') +
+      (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="#e879a8" stroke-width="2.5"/>' : '') +
+      (showV ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.5" fill="#e879a8"/>'; }).join('') : '') +
       hovers;
     var tip = $('tip');
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
       rect.addEventListener('mousemove', function (e) {
         var d = series[+rect.dataset.i];
-        tip.innerHTML = '<strong>' + esc(d.label) + '</strong><br>🦞 ' + d.visitors + ' visitors<br>📄 ' + d.pageviews + ' views';
+        tip.innerHTML = '<strong>' + esc(d.label) + '</strong>' +
+          (showV ? '<br>🦞 ' + d.visitors + ' visitors' : '') +
+          (showP ? '<br>📄 ' + d.pageviews + ' views' : '');
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
       rect.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
@@ -344,8 +359,28 @@
     });
   }
 
+  // ── series toggle (click legend) ──
+  function syncLegend() {
+    ['visitors', 'pageviews'].forEach(function (k) {
+      var b = $('leg-' + k);
+      if (b) b.setAttribute('aria-pressed', state.show[k] ? 'true' : 'false');
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.leg'), function (btn) {
+    btn.addEventListener('click', function () {
+      var k = btn.dataset.key, other = k === 'visitors' ? 'pageviews' : 'visitors';
+      // Turning off the last visible line would empty the chart → flip instead of blanking.
+      if (state.show[k] && !state.show[other]) { state.show[k] = false; state.show[other] = true; }
+      else { state.show[k] = !state.show[k]; }
+      localStorage.setItem('nyx_show', JSON.stringify(state.show));
+      syncLegend();
+      if (lastStats && lastStats.series) drawChart(lastStats.series);
+    });
+  });
+
   function boot() {
     hideLogin();
+    syncLegend();
     loadSites().then(load);
     // live dashboard: refresh every 15s while the tab is visible
     clearInterval(window.__rt);
