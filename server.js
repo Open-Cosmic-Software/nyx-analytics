@@ -566,6 +566,53 @@ function purgeOld() {
 }
 if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
 
+// ── visitor journeys: session-based path transitions for a sankey flow ───────────
+// A "session" = one visitor's pageviews with < 30 min between them.
+// Returns the top N transitions per depth (entry → step 2 → step 3 …), plus exits.
+app.get('/api/journeys', authOrShare, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  const { start, end } = rangeFor(req.query);
+  const maxDepth = Math.min(5, Math.max(2, parseInt(req.query.depth, 10) || 4));
+  const GAP = 30 * 60000;
+  const rows = db.prepare('SELECT vh, ts, path FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL ORDER BY vh, ts, id').all(site.id, start, end);
+  const links = new Map(); // "depth|from|to" → count   (to = path or "✖ exit")
+  let sessions = 0;
+  let cur = null; // { vh, lastTs, steps: [paths] }
+  const flush = (s) => {
+    if (!s) return;
+    sessions++;
+    const steps = s.steps.slice(0, maxDepth);
+    for (let i = 0; i < steps.length; i++) {
+      const from = steps[i];
+      const to = i + 1 < steps.length ? steps[i + 1] : (s.steps.length > maxDepth ? '…' : '✖ exit');
+      const k = i + '|' + from + '|' + to;
+      links.set(k, (links.get(k) || 0) + 1);
+    }
+  };
+  for (const r of rows) {
+    if (!cur || cur.vh !== r.vh || r.ts - cur.lastTs > GAP) { flush(cur); cur = { vh: r.vh, lastTs: r.ts, steps: [r.path] }; continue; }
+    cur.lastTs = r.ts;
+    // collapse immediate self-loops (reloads) — they add noise, not insight
+    if (cur.steps[cur.steps.length - 1] !== r.path) cur.steps.push(r.path);
+  }
+  flush(cur);
+  // keep the top 12 links per depth so the sankey stays readable
+  const byDepth = new Map();
+  for (const [k, count] of links) {
+    const [d, from, to] = k.split('|');
+    if (!byDepth.has(d)) byDepth.set(d, []);
+    byDepth.get(d).push({ depth: +d, from, to, count });
+  }
+  const out = [];
+  for (const arr of byDepth.values()) {
+    arr.sort((a, b) => b.count - a.count);
+    out.push(...arr.slice(0, 12));
+  }
+  res.json({ sessions, maxDepth, links: out });
+});
+
 // ── daily digest: one webhook message per day summarising every site (yesterday vs the day before).
 // Configure DIGEST_WEBHOOK_URL (Discord-compatible) and optionally DIGEST_HOUR_UTC (default 7).
 const DIGEST_WEBHOOK_URL = process.env.DIGEST_WEBHOOK_URL || '';
@@ -598,5 +645,38 @@ if (DIGEST_WEBHOOK_URL) {
     if (now.getUTCHours() === DIGEST_HOUR_UTC && lastDigestDay !== today) { lastDigestDay = today; sendDigest(); }
   }, 5 * 60000).unref();
 }
+
+// ── anomaly watchdog: hourly check of the last hour vs. the same hour on previous days.
+// Baseline = median of the same UTC hour over the last 14 days — same-hour compare avoids
+// the classic "every night is an incident" trap of naive averages. Cooldown 6h per site+kind.
+const WATCH_MIN_VISITORS = Math.max(1, parseInt(process.env.WATCH_MIN_VISITORS, 10) || 10);
+const watchAlerted = new Map(); // "siteId|spike" / "siteId|drop" → last alert ts
+function median(a) { const s = [...a].sort((x, y) => x - y); return s.length ? (s[s.length >> 1] + s[(s.length - 1) >> 1]) / 2 : 0; }
+async function watchdogTick() {
+  const now = Date.now();
+  const hourStart = now - 3600e3;
+  for (const site of allSites.all()) {
+    const cur = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND name IS NULL').get(site.id, hourStart).v;
+    const hist = [];
+    for (let d = 1; d <= 14; d++) {
+      const s = hourStart - d * 864e5;
+      hist.push(db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, s, s + 3600e3).v);
+    }
+    const base = median(hist);
+    // abstain when the baseline is too thin to mean anything — a default is not a measurement
+    if (base < WATCH_MIN_VISITORS && cur < WATCH_MIN_VISITORS) continue;
+    let kind = null, emoji = '', text = '';
+    if (base >= 1 && cur >= Math.max(3 * base, base + WATCH_MIN_VISITORS)) { kind = 'spike'; emoji = '🚀'; text = `traffic spike: **${cur}** visitors last hour (usually ~${base})`; }
+    else if (base >= WATCH_MIN_VISITORS && cur <= base * 0.2) { kind = 'drop'; emoji = '📉'; text = `traffic drop: **${cur}** visitors last hour (usually ~${base}) — tracker offline?`; }
+    if (!kind) continue;
+    const key = site.id + '|' + kind;
+    if (now - (watchAlerted.get(key) || 0) < 6 * 3600e3) continue; // cooldown
+    watchAlerted.set(key, now);
+    try {
+      await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Nyx Analytics 🦞', content: `${emoji} **${site.domain}** ${text}` }) });
+    } catch (e) { console.error('watchdog webhook error:', e.message); }
+  }
+}
+if (DIGEST_WEBHOOK_URL) setInterval(watchdogTick, 3600e3).unref();
 
 app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
