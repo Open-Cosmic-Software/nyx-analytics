@@ -68,6 +68,22 @@ ensureColumn('utm_campaign', 'TEXT'); // campaign name (utm_campaign)
 ensureColumn('dur', 'INTEGER'); // engagement seconds (set by a follow-up beacon on page leave)
 ensureColumn('props', 'TEXT'); // custom event properties, JSON object as text
 
+// share links + funnels live in their own small tables (additive, safe on old installs)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shares (
+    token TEXT PRIMARY KEY,
+    site_id INTEGER NOT NULL,
+    created INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS funnels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    steps TEXT NOT NULL, -- JSON array of {type:'page'|'goal', value}
+    created INTEGER NOT NULL
+  );
+`);
+
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
 const insSite = db.prepare('INSERT OR IGNORE INTO sites (domain, name, created) VALUES (?, ?, ?)');
@@ -242,6 +258,19 @@ function auth(req, res, next) {
   res.status(401).json({ error: 'Not authenticated' });
 }
 
+// share-token auth: read-only stats access scoped to exactly one site.
+// Accepted as ?share=<token>; the handler must verify req.shareSite matches the queried site.
+const getShare = db.prepare('SELECT * FROM shares WHERE token = ?');
+function authOrShare(req, res, next) {
+  const tok = String(req.query.share || '');
+  if (/^[a-f0-9]{32,64}$/.test(tok)) {
+    const sh = getShare.get(tok);
+    if (sh) { req.shareSiteId = sh.site_id; return next(); }
+  }
+  return auth(req, res, next);
+}
+function shareScopeOk(req, site) { return req.shareSiteId == null || req.shareSiteId === site.id; }
+
 // ── sites management ─────────────────────────────────────────────────────────
 const sitesListHandler = (_req, res) => res.json(allSites.all());
 const sitesCreateHandler = (req, res) => {
@@ -315,6 +344,7 @@ function buildFilters(query) {
 function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
   const sid = site.id;
   const { start, end, days, period, hourly } = rangeFor(req.query);
   const { clauses, params, goal } = buildFilters(req.query);
@@ -419,13 +449,14 @@ function statsHandler(req, res) {
     realtime: db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, Date.now() - 5 * 60000).v,
   });
 }
-app.get('/api/stats', auth, statsHandler);
-app.get('/api/v1/stats', auth, statsHandler);
+app.get('/api/stats', authOrShare, statsHandler);
+app.get('/api/v1/stats', authOrShare, statsHandler);
 
 // ── realtime: live visitors + per-minute pulse + recent event feed (last 30 min) ──
 function realtimeHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
   const sid = site.id, now = Date.now(), since = now - 30 * 60000;
   const online = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, now - 5 * 60000).v;
   const rows = db.prepare('SELECT CAST((ts/60000) AS INT) b, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ? GROUP BY b').all(sid, since);
@@ -435,8 +466,89 @@ function realtimeHandler(req, res) {
   const recent = db.prepare('SELECT ts, path, country, tz, browser, os, device, source, lang, name FROM events WHERE site_id = ? AND ts >= ? ORDER BY id DESC LIMIT 60').all(sid, since);
   res.json({ online, minutes, recent, now });
 }
-app.get('/api/realtime', auth, realtimeHandler);
-app.get('/api/v1/realtime', auth, realtimeHandler);
+app.get('/api/realtime', authOrShare, realtimeHandler);
+app.get('/api/v1/realtime', authOrShare, realtimeHandler);
+
+// ── share links: create / list / revoke (owner only) + resolve (public) ──────────
+app.get('/api/shares', auth, (req, res) => {
+  const rows = db.prepare('SELECT s.token, s.created, st.domain FROM shares s JOIN sites st ON st.id = s.site_id ORDER BY s.created DESC').all();
+  res.json(rows);
+});
+app.post('/api/shares', auth, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.body && req.body.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  const token = newToken();
+  db.prepare('INSERT INTO shares (token, site_id, created) VALUES (?, ?, ?)').run(token, site.id, Date.now());
+  res.json({ token, domain: site.domain, url: '/share/' + token });
+});
+app.delete('/api/shares/:token', auth, (req, res) => {
+  db.prepare('DELETE FROM shares WHERE token = ?').run(String(req.params.token));
+  res.json({ ok: true });
+});
+// public: resolve a share token to its site (used by the read-only dashboard)
+app.get('/api/share-info/:token', (req, res) => {
+  const sh = getShare.get(String(req.params.token));
+  if (!sh) return res.status(404).json({ error: 'Unknown or revoked share link' });
+  const site = db.prepare('SELECT domain, name FROM sites WHERE id = ?').get(sh.site_id);
+  res.json({ domain: site.domain, name: site.name });
+});
+
+// ── funnels: ordered steps (pages or goals), conversion measured per visitor in-range ──
+app.get('/api/funnels', auth, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  res.json(db.prepare('SELECT id, name, steps, created FROM funnels WHERE site_id = ? ORDER BY id').all(site.id).map((f) => ({ ...f, steps: JSON.parse(f.steps) })));
+});
+app.post('/api/funnels', auth, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.body && req.body.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  const name = String((req.body && req.body.name) || '').slice(0, 80).trim();
+  const raw = (req.body && req.body.steps) || [];
+  if (!name) return res.status(400).json({ error: 'Funnel needs a name' });
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 8) return res.status(400).json({ error: 'Funnel needs 2-8 steps' });
+  const steps = raw.map((s) => ({
+    type: s && s.type === 'goal' ? 'goal' : 'page',
+    value: String((s && s.value) || '').slice(0, 200).trim(),
+    label: String((s && (s.label || s.value)) || '').slice(0, 80).trim(),
+  }));
+  if (steps.some((s) => !s.value)) return res.status(400).json({ error: 'Every step needs a value' });
+  const info = db.prepare('INSERT INTO funnels (site_id, name, steps, created) VALUES (?, ?, ?, ?)').run(site.id, name, JSON.stringify(steps), Date.now());
+  res.json({ id: info.lastInsertRowid, name, steps });
+});
+app.delete('/api/funnels/:id', auth, (req, res) => {
+  db.prepare('DELETE FROM funnels WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true });
+});
+// funnel evaluation: strictly ordered — a visitor counts for step N only after matching step N-1.
+app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
+  const f = db.prepare('SELECT * FROM funnels WHERE id = ?').get(Number(req.params.id));
+  if (!f) return res.status(404).json({ error: 'Unknown funnel' });
+  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(f.site_id);
+  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  const { start, end } = rangeFor(req.query);
+  const steps = JSON.parse(f.steps);
+  // one pass per visitor: fetch matching events sorted by time, walk the step ladder.
+  const conds = steps.map((s) => (s.type === 'goal' ? 'name = ?' : "(name IS NULL AND path = ?)"));
+  const rows = db.prepare(
+    `SELECT vh, ts, path, name FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND (${conds.join(' OR ')}) ORDER BY vh, ts, id`,
+  ).all(f.site_id, start, end, ...steps.map((s) => s.value));
+  const progress = new Map(); // vh → next step index the visitor still needs
+  for (const r of rows) {
+    const at = progress.get(r.vh) || 0;
+    if (at >= steps.length) continue;
+    const s = steps[at];
+    const match = s.type === 'goal' ? r.name === s.value : r.name == null && r.path === s.value;
+    if (match) progress.set(r.vh, at + 1);
+  }
+  const counts = steps.map(() => 0);
+  for (const reached of progress.values()) for (let i = 0; i < reached; i++) counts[i]++;
+  const out = steps.map((s, i) => ({
+    label: s.label || s.value, type: s.type, value: s.value, visitors: counts[i],
+    pctOfFirst: counts[0] ? +((counts[i] / counts[0]) * 100).toFixed(1) : 0,
+    dropFromPrev: i > 0 && counts[i - 1] ? +((1 - counts[i] / counts[i - 1]) * 100).toFixed(1) : 0,
+  }));
+  res.json({ id: f.id, name: f.name, range: { from: new Date(start).toISOString().slice(0, 10), to: new Date(end - 1).toISOString().slice(0, 10) }, steps: out });
+});
 
 // ── static dashboard ─────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
