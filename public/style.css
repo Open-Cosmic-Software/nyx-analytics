@@ -187,3 +187,17 @@ select:focus, input:focus { border-color: rgba(168,85,247,.5); }
 .hide { display: none !important; }
 
 @media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } .panels { grid-template-columns: 1fr; } }
+
+/* ── funnels ── */
+.funnels { display: flex; flex-direction: column; gap: 18px; }
+.funnel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.funnel-del { background: none; border: none; color: var(--muted, #888); cursor: pointer; font-size: 1.1rem; }
+.funnel-del:hover { color: #f87171; }
+.funnel-step { display: grid; grid-template-columns: 200px 1fr; gap: 10px; align-items: center; margin: 4px 0; }
+.funnel-label { font-size: .82rem; color: var(--muted, #aaa); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.funnel-bar-wrap { position: relative; display: flex; align-items: center; gap: 8px; }
+.funnel-bar { height: 18px; border-radius: 5px; background: linear-gradient(90deg, #e879a8, #67e8f9); min-width: 3px; transition: width .4s; }
+.funnel-nums { font-size: .78rem; color: var(--muted, #aaa); white-space: nowrap; }
+.funnel-nums .drop { color: #f87171; }
+.step-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; margin: 6px 0; }
+@media (max-width: 640px) { .funnel-step { grid-template-columns: 1fr; gap: 2px; } }

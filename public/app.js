@@ -1,6 +1,8 @@
 /* Nyx Analytics dashboard 🦞 */
 (function () {
   var TOKEN = localStorage.getItem('nyx_token') || '';
+  // share mode: /share/<token> renders a read-only dashboard without login
+  var SHARE = (location.pathname.match(/^\/share\/([a-f0-9]{32,64})$/) || [])[1] || '';
   var state = { site: localStorage.getItem('nyx_site') || '', period: '7d', from: '', to: '', sites: [], filters: {}, srcTab: 'sources', pageTab: 'pages' };
   // which chart series are visible (toggled via the legend)
   state.show = { visitors: true, pageviews: true };
@@ -18,6 +20,7 @@
   // build the stats/realtime query string from the current site, period/range and active filters
   function statsQuery() {
     var q = 'site=' + encodeURIComponent(state.site);
+    if (SHARE) q += '&share=' + SHARE;
     if (state.from && state.to) q += '&from=' + state.from + '&to=' + state.to;
     else q += '&period=' + state.period;
     Object.keys(state.filters).forEach(function (k) { q += '&' + k + '=' + encodeURIComponent(state.filters[k]); });
@@ -35,7 +38,7 @@
     opts = opts || {};
     opts.headers = Object.assign({ 'Content-Type': 'application/json', 'x-session-token': TOKEN }, opts.headers || {});
     return fetch(path, opts).then(function (r) {
-      if (r.status === 401) { showLogin(); throw new Error('auth'); }
+      if (r.status === 401) { if (!SHARE) showLogin(); throw new Error('auth'); }
       return r.json().catch(function () { return {}; });
     });
   }
@@ -76,7 +79,7 @@
       sel.value = state.site;
     });
   }
-  $('siteSelect').onchange = function () { state.site = this.value; localStorage.setItem('nyx_site', state.site); load(); };
+  $('siteSelect').onchange = function () { state.site = this.value; localStorage.setItem('nyx_site', state.site); load(); if (typeof loadFunnels === 'function') loadFunnels(); };
 
   $('addSiteBtn').onclick = function () { $('addModal').classList.remove('hide'); $('newDomain').value = ''; $('addErr').textContent = ''; $('newDomain').focus(); };
   $('cancelAdd').onclick = function () { $('addModal').classList.add('hide'); };
@@ -378,10 +381,84 @@
     });
   });
 
+  // ── share links ──
+  var shareToken = null;
+  $('shareBtn').onclick = function () {
+    if (!state.site) return;
+    api('/api/shares', { method: 'POST', body: JSON.stringify({ site: state.site }) }).then(function (s) {
+      if (s.error) return;
+      shareToken = s.token;
+      $('shareDomain').textContent = s.domain;
+      $('shareUrl').textContent = ORIGIN + '/share/' + s.token;
+      $('shareModal').classList.remove('hide');
+    });
+  };
+  $('copyShare').onclick = function () { navigator.clipboard.writeText($('shareUrl').textContent); $('copyShare').textContent = 'Copied ✓'; setTimeout(function () { $('copyShare').textContent = 'Copy link'; }, 1500); };
+  $('revokeShare').onclick = function () { if (shareToken) api('/api/shares/' + shareToken, { method: 'DELETE' }).then(function () { $('shareModal').classList.add('hide'); }); };
+  $('closeShare').onclick = function () { $('shareModal').classList.add('hide'); };
+
+  // ── funnels ──
+  function fmtPct(p) { return (p == null ? '—' : p + '%'); }
+  function loadFunnels() {
+    if (SHARE) { $('funnels').innerHTML = ''; $('addFunnelBtn').classList.add('hide'); return; }
+    if (!state.site) return;
+    api('/api/funnels?site=' + encodeURIComponent(state.site)).then(function (fs) {
+      if (!Array.isArray(fs)) return;
+      if (!fs.length) { $('funnels').innerHTML = '<div class="empty">No funnels yet — define one to see where visitors drop off.</div>'; return; }
+      $('funnels').innerHTML = '';
+      fs.forEach(function (f) {
+        var q = state.from && state.to ? 'from=' + state.from + '&to=' + state.to : 'period=' + state.period;
+        api('/api/funnels/' + f.id + '/stats?' + q).then(function (st) {
+          if (st.error) return;
+          var max = st.steps.length ? st.steps[0].visitors : 0;
+          var html = '<div class="funnel"><div class="funnel-head"><strong>' + esc(st.name) + '</strong>' +
+            '<button class="funnel-del" data-id="' + f.id + '" title="Delete funnel">×</button></div>';
+          st.steps.forEach(function (s, i) {
+            var w = max ? Math.max(2, (s.visitors / max) * 100) : 2;
+            html += '<div class="funnel-step"><div class="funnel-label">' + (i + 1) + '. ' + (s.type === 'goal' ? '🎯 ' : '📄 ') + esc(s.label) + '</div>' +
+              '<div class="funnel-bar-wrap"><div class="funnel-bar" style="width:' + w + '%"></div>' +
+              '<span class="funnel-nums">' + fmt(s.visitors) + ' · ' + s.pctOfFirst + '%' + (i > 0 ? ' <span class="drop">−' + s.dropFromPrev + '%</span>' : '') + '</span></div></div>';
+          });
+          html += '</div>';
+          $('funnels').insertAdjacentHTML('beforeend', html);
+          $('funnels').querySelectorAll('.funnel-del').forEach(function (btn) {
+            btn.onclick = function () { api('/api/funnels/' + btn.dataset.id, { method: 'DELETE' }).then(loadFunnels); };
+          });
+        });
+      });
+    });
+  }
+
+  function stepRow() {
+    var div = document.createElement('div');
+    div.className = 'step-row';
+    div.innerHTML = '<select class="step-type"><option value="page">Page</option><option value="goal">Goal</option></select>' +
+      '<input class="step-value" type="text" placeholder="/pricing or Signup" autocomplete="off">';
+    return div;
+  }
+  $('addFunnelBtn').onclick = function () {
+    $('funnelErr').textContent = ''; $('funnelName').value = '';
+    var wrap = $('funnelSteps'); wrap.innerHTML = '';
+    wrap.appendChild(stepRow()); wrap.appendChild(stepRow());
+    $('funnelModal').classList.remove('hide'); $('funnelName').focus();
+  };
+  $('addStepBtn').onclick = function () { if ($('funnelSteps').children.length < 8) $('funnelSteps').appendChild(stepRow()); };
+  $('cancelFunnel').onclick = function () { $('funnelModal').classList.add('hide'); };
+  $('createFunnelBtn').onclick = function () {
+    var steps = Array.prototype.map.call($('funnelSteps').children, function (row) {
+      return { type: row.querySelector('.step-type').value, value: row.querySelector('.step-value').value.trim() };
+    }).filter(function (s) { return s.value; });
+    api('/api/funnels', { method: 'POST', body: JSON.stringify({ site: state.site, name: $('funnelName').value, steps: steps }) }).then(function (r) {
+      if (r.error) { $('funnelErr').textContent = r.error; return; }
+      $('funnelModal').classList.add('hide');
+      loadFunnels();
+    });
+  };
+
   function boot() {
     hideLogin();
     syncLegend();
-    loadSites().then(load);
+    loadSites().then(function () { load(); loadFunnels(); });
     // live dashboard: refresh every 15s while the tab is visible
     clearInterval(window.__rt);
     window.__rt = setInterval(function () {
@@ -390,5 +467,21 @@
     }, 15000);
   }
 
-  if (TOKEN) boot(); else showLogin();
+  // share mode: resolve the token, lock the UI down to one site, skip login entirely
+  function bootShare() {
+    fetch('/api/share-info/' + SHARE).then(function (r) { return r.json(); }).then(function (info) {
+      if (info.error) { document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#e879a8;font-family:sans-serif"><div><h2>🔗 Link expired</h2><p>This share link was revoked or never existed.</p></div></div>'; return; }
+      hideLogin();
+      state.site = info.domain;
+      var sel = $('siteSelect');
+      sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
+      ['addSiteBtn', 'logoutBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      syncLegend();
+      load();
+      clearInterval(window.__rt);
+      window.__rt = setInterval(function () { if (!document.hidden) load(); }, 15000);
+    });
+  }
+
+  if (SHARE) bootShare(); else if (TOKEN) boot(); else showLogin();
 })();

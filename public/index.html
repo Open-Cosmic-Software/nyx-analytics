@@ -60,6 +60,7 @@
         <button class="btn ghost" id="applyRange">Apply</button>
       </div>
       <button class="btn ghost" id="exportBtn">⬇ CSV</button>
+      <button class="btn ghost" id="shareBtn" title="Create a public read-only link">🔗 Share</button>
       <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
     </div>
   </div>
@@ -116,6 +117,14 @@
       <div class="card panel"><h3><span class="em">🗣️</span> Languages</h3><div class="bars" id="p-languages"></div></div>
     </div>
 
+    <!-- funnels -->
+    <div class="card panel" style="margin-top:16px">
+      <h3><span class="em">🌀</span> Funnels
+        <span class="tabs"><button id="addFunnelBtn">+ New funnel</button></span>
+      </h3>
+      <div id="funnels" class="funnels"></div>
+    </div>
+
     <!-- custom-event properties (shown when drilled into a single goal) -->
     <div id="propsWrap" class="panels hide" style="margin-top:16px"></div>
   </div>
@@ -144,6 +153,34 @@
     <p class="muted" style="text-align:left;font-size:.78rem;margin:-2px 0 12px">Track goals &amp; properties from your code:<br><code style="color:var(--cyan)">nyx('Signup')</code> · <code style="color:var(--cyan)">nyx('Signup', { plan: 'pro' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code style="color:var(--cyan)">data-honor-dnt</code> · <code style="color:var(--cyan)">data-track-outbound</code></span></p>
     <button class="btn" id="copySnippet">Copy snippet</button>
     <button class="btn ghost" id="closeSnippet" style="margin-top:10px">Close</button>
+  </div>
+</div>
+
+<!-- Share modal -->
+<div id="shareModal" class="modal-overlay hide">
+  <div class="modal">
+    <span class="logo em">🔗</span>
+    <h2 class="grad-text">Share dashboard</h2>
+    <p>Anyone with this link can view stats for <strong id="shareDomain"></strong> — read-only, no login.</p>
+    <div class="snippet" id="shareUrl" style="word-break:break-all"></div>
+    <button class="btn" id="copyShare">Copy link</button>
+    <button class="btn ghost danger" id="revokeShare" style="margin-top:10px">Revoke this link</button>
+    <button class="btn ghost" id="closeShare" style="margin-top:10px">Close</button>
+  </div>
+</div>
+
+<!-- Funnel builder modal -->
+<div id="funnelModal" class="modal-overlay hide">
+  <div class="modal">
+    <span class="logo em">🌀</span>
+    <h2 class="grad-text">New funnel</h2>
+    <p>2–8 ordered steps. A visitor advances only after completing the previous step.</p>
+    <div id="funnelErr" class="err"></div>
+    <input id="funnelName" type="text" placeholder="Funnel name, e.g. Signup flow" autocomplete="off">
+    <div id="funnelSteps"></div>
+    <button class="btn ghost" id="addStepBtn" style="margin-top:6px">+ Add step</button>
+    <button class="btn" id="createFunnelBtn" style="margin-top:10px">Create →</button>
+    <button class="btn ghost" id="cancelFunnel" style="margin-top:10px">Cancel</button>
   </div>
 </div>
 
