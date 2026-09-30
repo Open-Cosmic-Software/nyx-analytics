@@ -566,4 +566,37 @@ function purgeOld() {
 }
 if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}`));
+// ── daily digest: one webhook message per day summarising every site (yesterday vs the day before).
+// Configure DIGEST_WEBHOOK_URL (Discord-compatible) and optionally DIGEST_HOUR_UTC (default 7).
+const DIGEST_WEBHOOK_URL = process.env.DIGEST_WEBHOOK_URL || '';
+const DIGEST_HOUR_UTC = Math.min(23, Math.max(0, parseInt(process.env.DIGEST_HOUR_UTC, 10) || 7));
+let lastDigestDay = null;
+async function sendDigest() {
+  const yStart = new Date(new Date(Date.now() - 864e5).toISOString().slice(0, 10)).getTime();
+  const yEnd = yStart + 864e5, pStart = yStart - 864e5;
+  const lines = [];
+  for (const site of allSites.all()) {
+    const cur = db.prepare('SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, yStart, yEnd);
+    if (!cur.pv) continue; // silent sites stay out of the report
+    const was = db.prepare('SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, pStart, yStart);
+    const top = db.prepare("SELECT path, COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL GROUP BY path ORDER BY c DESC LIMIT 1").get(site.id, yStart, yEnd);
+    const goals = db.prepare('SELECT COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NOT NULL').get(site.id, yStart, yEnd).c;
+    const arrow = was.v ? (cur.v > was.v ? '⬆️' : cur.v < was.v ? '⬇️' : '➡️') : '✨';
+    lines.push(`**${site.domain}** ${arrow} ${cur.v} visitors · ${cur.pv} views${goals ? ` · ${goals} events` : ''}${top ? ` · top \`${top.path}\`` : ''}`);
+  }
+  if (!lines.length) return;
+  const body = { username: 'Nyx Analytics 🦞', content: `📊 **Daily digest — ${new Date(yStart).toISOString().slice(0, 10)}**\n` + lines.join('\n') };
+  try {
+    const r = await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) console.error('digest webhook failed:', r.status);
+  } catch (e) { console.error('digest webhook error:', e.message); }
+}
+if (DIGEST_WEBHOOK_URL) {
+  setInterval(() => {
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() === DIGEST_HOUR_UTC && lastDigestDay !== today) { lastDigestDay = today; sendDigest(); }
+  }, 5 * 60000).unref();
+}
+
+app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
