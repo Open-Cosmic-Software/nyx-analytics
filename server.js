@@ -552,20 +552,6 @@ app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
 
 // ── static dashboard ─────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
-// ── data retention (privacy by design: minimise what we keep) ─────────────────
-// When DATA_RETENTION_DAYS > 0, raw events older than the window are purged daily.
-// Aggregates you've already exported stay yours; the raw rows simply don't linger.
-const delOld = db.prepare('DELETE FROM events WHERE ts < ?');
-function purgeOld() {
-  if (RETENTION_DAYS <= 0) return;
-  const cutoff = Date.now() - RETENTION_DAYS * 864e5;
-  const info = delOld.run(cutoff);
-  if (info.changes) console.log(`Nyx Analytics 🦞 retention: purged ${info.changes} events older than ${RETENTION_DAYS}d`);
-}
-if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
-
 // ── visitor journeys: session-based path transitions for a sankey flow ───────────
 // A "session" = one visitor's pageviews with < 30 min between them.
 // Returns the top N transitions per depth (entry → step 2 → step 3 …), plus exits.
@@ -612,6 +598,21 @@ app.get('/api/journeys', authOrShare, (req, res) => {
   }
   res.json({ sessions, maxDepth, links: out });
 });
+
+
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// ── data retention (privacy by design: minimise what we keep) ─────────────────
+// When DATA_RETENTION_DAYS > 0, raw events older than the window are purged daily.
+// Aggregates you've already exported stay yours; the raw rows simply don't linger.
+const delOld = db.prepare('DELETE FROM events WHERE ts < ?');
+function purgeOld() {
+  if (RETENTION_DAYS <= 0) return;
+  const cutoff = Date.now() - RETENTION_DAYS * 864e5;
+  const info = delOld.run(cutoff);
+  if (info.changes) console.log(`Nyx Analytics 🦞 retention: purged ${info.changes} events older than ${RETENTION_DAYS}d`);
+}
+if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
 
 // ── daily digest: one webhook message per day summarising every site (yesterday vs the day before).
 // Configure DIGEST_WEBHOOK_URL (Discord-compatible) and optionally DIGEST_HOUR_UTC (default 7).

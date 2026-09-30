@@ -359,6 +359,8 @@
       bars('p-languages', s.languages, { filterKey: 'lang' });
       bars('p-goals', s.goals, { filterKey: 'goal', cr: true, label: function (r) { return '🎯 ' + r.name; } });
       renderProps(s);
+      loadJourneys();
+      loadFunnels();
     });
   }
 
@@ -380,6 +382,96 @@
       if (lastStats && lastStats.series) drawChart(lastStats.series);
     });
   });
+
+  // ── visitor journeys: hand-rolled sankey (no lib) ──
+  function loadJourneys() {
+    if (!state.site) return;
+    var q = statsQuery();
+    api('/api/journeys?' + q).then(function (j) {
+      if (j.error || !j.links) return;
+      drawSankey(j);
+      $('journeyMeta').textContent = '· ' + fmt(j.sessions) + ' sessions, top paths, 30-min session window';
+    }).catch(function (e) { if (window.console) console.error('journeys:', e); });
+  }
+  function drawSankey(j) {
+    var svg = $('journey');
+    svg.innerHTML = '';
+    if (!j.links.length) { svg.innerHTML = '<text x="20" y="40" fill="#888" font-size="13">Not enough data yet</text>'; return; }
+    var W = Math.max(svg.clientWidth || 760, 640), H = 340, PAD = 24, colW = 150;
+    var depths = j.maxDepth;
+    var colX = function (d) { return PAD + d * ((W - 2 * PAD - colW) / Math.max(1, depths - 1)); };
+    // node totals per column: sum of outgoing (or incoming for last col)
+    var nodes = {}; // "d|path" → {in,out}
+    j.links.forEach(function (l) {
+      var a = nodes[l.depth + '|' + l.from] = nodes[l.depth + '|' + l.from] || { v: 0 };
+      a.v += l.count;
+      var b = nodes[(l.depth + 1) + '|' + l.to] = nodes[(l.depth + 1) + '|' + l.to] || { v: 0 };
+      b.v = Math.max(b.v, 0) + l.count;
+    });
+    // layout: stack nodes per column by size
+    var cols = {};
+    Object.keys(nodes).forEach(function (k) {
+      var d = +k.split('|')[0];
+      (cols[d] = cols[d] || []).push({ key: k, path: k.slice(k.indexOf('|') + 1), v: nodes[k].v });
+    });
+    var maxTotal = 0;
+    Object.keys(cols).forEach(function (d) {
+      cols[d].sort(function (a, b) { return b.v - a.v; });
+      var t = cols[d].reduce(function (s, n) { return s + n.v; }, 0);
+      if (t > maxTotal) maxTotal = t;
+    });
+    var scale = (H - 2 * PAD - 40) / Math.max(1, maxTotal);
+    var pos = {}; // key → {x,y,h}
+    Object.keys(cols).forEach(function (d) {
+      var y = PAD;
+      cols[d].forEach(function (n) {
+        var h = Math.max(4, n.v * scale);
+        pos[n.key] = { x: colX(+d), y: y, h: h, v: n.v, path: n.path };
+        y += h + 10;
+      });
+    });
+    var ns = 'http://www.w3.org/2000/svg';
+    var used = {}; // per-node offsets so ribbons stack instead of overlap
+    j.links.forEach(function (l) {
+      var a = pos[l.depth + '|' + l.from], b = pos[(l.depth + 1) + '|' + l.to];
+      if (!a || !b) return;
+      var h = Math.max(2, l.count * scale);
+      var ao = used[l.depth + '|' + l.from] = used[l.depth + '|' + l.from] || { o: 0 };
+      var bo = used['in' + (l.depth + 1) + '|' + l.to] = used['in' + (l.depth + 1) + '|' + l.to] || { o: 0 };
+      var y1 = a.y + ao.o + h / 2, y2 = b.y + bo.o + h / 2;
+      ao.o += h; bo.o += h;
+      var x1 = a.x + 8, x2 = b.x;
+      var mx = (x1 + x2) / 2;
+      var p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
+      p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.28)' : 'rgba(103,232,249,.30)');
+      p.setAttribute('stroke-width', h);
+      p.setAttribute('fill', 'none');
+      p.style.transition = 'stroke .2s';
+      var tip = l.from + ' → ' + l.to + ' · ' + l.count;
+      p.addEventListener('mouseenter', function (e) { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.6)' : 'rgba(232,121,168,.6)'); showTip(e, tip); });
+      p.addEventListener('mousemove', function (e) { showTip(e, tip); });
+      p.addEventListener('mouseleave', function () { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.28)' : 'rgba(103,232,249,.30)'); hideTip(); });
+      svg.appendChild(p);
+    });
+    Object.keys(pos).forEach(function (k) {
+      var n = pos[k];
+      var r = document.createElementNS(ns, 'rect');
+      r.setAttribute('x', n.x); r.setAttribute('y', n.y);
+      r.setAttribute('width', 8); r.setAttribute('height', n.h);
+      r.setAttribute('rx', 2);
+      r.setAttribute('fill', n.path === '✖ exit' ? '#f87171' : n.path === '…' ? '#888' : '#e879a8');
+      svg.appendChild(r);
+      var t = document.createElementNS(ns, 'text');
+      t.setAttribute('x', n.x + 12); t.setAttribute('y', n.y + Math.min(n.h / 2 + 4, 14));
+      t.setAttribute('fill', '#cbd5e1'); t.setAttribute('font-size', '11');
+      var label = n.path.length > 22 ? n.path.slice(0, 21) + '…' : n.path;
+      t.textContent = label + ' (' + fmt(n.v) + ')';
+      svg.appendChild(t);
+    });
+  }
+  function showTip(e, text) { var tip = $('tip'); tip.textContent = text; tip.style.opacity = 1; tip.style.left = (e.pageX + 12) + 'px'; tip.style.top = (e.pageY - 10) + 'px'; }
+  function hideTip() { $('tip').style.opacity = 0; }
 
   // ── share links ──
   var shareToken = null;
