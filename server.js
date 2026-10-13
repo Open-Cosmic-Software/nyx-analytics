@@ -192,8 +192,25 @@ const TZ_COUNTRY = require('./tz-country.js');
 function countryFromTz(tz) { return (tz && TZ_COUNTRY[tz]) || null; }
 
 function dayStr(ts) { return new Date(ts).toISOString().slice(0, 10); }
+// Daily salt (13.10.2026): a fresh random secret per UTC day, stored only while that day lasts
+// (so a restart keeps today's visitors together) and DELETED as soon as the day changes.
+// Without it, anyone holding the DB and INGEST_SALT could recompute hashes for a known
+// IP + user agent and re-link a visitor across past days. Once a day's salt is gone, that
+// day's hashes can no longer be tied to anything — not even by us.
+db.exec('CREATE TABLE IF NOT EXISTS daily_salt (day TEXT PRIMARY KEY, salt TEXT NOT NULL)');
+const getSalt = db.prepare('SELECT salt FROM daily_salt WHERE day = ?');
+const putSalt = db.prepare('INSERT OR IGNORE INTO daily_salt (day, salt) VALUES (?, ?)');
+const dropOldSalts = db.prepare('DELETE FROM daily_salt WHERE day <> ?');
+let saltCache = { day: null, salt: null };
+function saltFor(day) {
+  if (saltCache.day === day) return saltCache.salt;
+  putSalt.run(day, crypto.randomBytes(32).toString('hex'));
+  dropOldSalts.run(day); // yesterday's salt is gone for good
+  saltCache = { day, salt: getSalt.get(day).salt };
+  return saltCache.salt;
+}
 function visitorHash(siteId, ip, ua, day) {
-  return crypto.createHash('sha256').update(`${INGEST_SALT}|${day}|${siteId}|${ip}|${ua}`).digest('hex').slice(0, 24);
+  return crypto.createHash('sha256').update(`${INGEST_SALT}|${saltFor(day)}|${day}|${siteId}|${ip}|${ua}`).digest('hex').slice(0, 24);
 }
 function clientIp(req) {
   const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();

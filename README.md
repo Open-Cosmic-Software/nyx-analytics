@@ -134,7 +134,7 @@ NyxAnalytics.instance.purchase(value: 49.90, currency: 'EUR', items: 2);
 Send any non-empty, non-bot `User-Agent` (e.g. `MyApp/1.4 (android)`).
 
 Privacy stays the same as on the web: **no device or advertising id, no cookies, no IP stored.**
-The server hashes the launch id with a daily salt, so a visitor is never followed across days.
+The server hashes the launch id with a random daily salt that is deleted when the day ends, so a visitor is never followed across days.
 Without `sid`, the usual IP + user-agent daily hash is used. Region comes from the timezone or
 device locale, never from IP geolocation.
 
@@ -199,7 +199,7 @@ cookie banner — the same approach as Plausible/Fathom.
 | `PORT` | `3920` | Port (bound to 127.0.0.1) |
 | `WEB_PASSWORD` | `nyx` | Dashboard passphrase |
 | `SESSION_SECRET` | random | Session-token secret |
-| `INGEST_SALT` | fixed | Salt for the daily visitor hash (rotate to reset identities) |
+| `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
 | `DATA_RETENTION_DAYS` | `0` | `0` = keep forever; `>0` purges raw events older than N days, daily (data minimisation) |
@@ -207,7 +207,7 @@ cookie banner — the same approach as Plausible/Fathom.
 ## Privacy & security
 
 - No cookies, no cross-site tracking, **IPs never persisted**.
-- Daily one-way visitor hash; salt rotates daily.
+- Daily one-way visitor hash with a **random salt per day that is deleted when the day ends**. Past days can't be re-linked afterwards, not even with the database, a known IP or user agent, or the server's own secrets.
 - **Data minimisation:** set `DATA_RETENTION_DAYS` to auto-purge raw events after your chosen window.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
