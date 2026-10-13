@@ -192,25 +192,50 @@ const TZ_COUNTRY = require('./tz-country.js');
 function countryFromTz(tz) { return (tz && TZ_COUNTRY[tz]) || null; }
 
 function dayStr(ts) { return new Date(ts).toISOString().slice(0, 10); }
-// Daily salt (13.10.2026): a fresh random secret per UTC day, stored only while that day lasts
-// (so a restart keeps today's visitors together) and DELETED as soon as the day changes.
+// Daily salt (13.10.2026, hardened after Tyto's review): a fresh random secret per UTC day.
 // Without it, anyone holding the DB and INGEST_SALT could recompute hashes for a known
-// IP + user agent and re-link a visitor across past days. Once a day's salt is gone, that
-// day's hashes can no longer be tied to anything — not even by us.
-db.exec('CREATE TABLE IF NOT EXISTS daily_salt (day TEXT PRIMARY KEY, salt TEXT NOT NULL)');
-const getSalt = db.prepare('SELECT salt FROM daily_salt WHERE day = ?');
-const putSalt = db.prepare('INSERT OR IGNORE INTO daily_salt (day, salt) VALUES (?, ?)');
-const dropOldSalts = db.prepare('DELETE FROM daily_salt WHERE day <> ?');
+// IP + user agent and re-link a visitor across past days.
+// - It never touches the SQLite file. SQLite DELETE leaves bytes in free pages and the WAL;
+//   the salt lives in its own tiny file (data/.day-salt, 0600) that is overwritten in place
+//   with the next day's value — the old bytes are replaced, not unlinked and left behind.
+// - Only the server clock decides the day, and a salt is only ever created for *today*. A
+//   request for any other day (clock jump, late or offline-queued events) never creates or
+//   drops a salt; it gets a one-off random hash that links to nothing.
+// - Kept for the day so a restart doesn't split today's visitors.
+const SALT_FILE = path.join(path.dirname(DB_PATH), '.day-salt');
 let saltCache = { day: null, salt: null };
-function saltFor(day) {
-  if (saltCache.day === day) return saltCache.salt;
-  putSalt.run(day, crypto.randomBytes(32).toString('hex'));
-  dropOldSalts.run(day); // yesterday's salt is gone for good
-  saltCache = { day, salt: getSalt.get(day).salt };
+function writeSaltInPlace(content) {
+  const buf = Buffer.alloc(128, 0); buf.write(content); // fixed size → the old value is fully overwritten
+  const fd = fs.openSync(SALT_FILE, fs.existsSync(SALT_FILE) ? 'r+' : 'w', 0o600);
+  try { fs.fchmodSync(fd, 0o600); fs.writeSync(fd, buf, 0, buf.length, 0); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+function todaysSalt() {
+  const today = dayStr(Date.now());
+  if (saltCache.day === today) return saltCache.salt;
+  let stored = null;
+  try { stored = fs.readFileSync(SALT_FILE, 'utf8').replace(/\0+$/, '').split(' '); } catch {}
+  if (stored && stored[0] === today && /^[0-9a-f]{64}$/.test(stored[1] || '')) {
+    saltCache = { day: today, salt: stored[1] };
+  } else if (!stored || !stored[0] || stored[0] < today) {
+    const salt = crypto.randomBytes(32).toString('hex');
+    writeSaltInPlace(`${today} ${salt}`); // overwrites yesterday's bytes
+    saltCache = { day: today, salt };
+  } else {
+    // file is from a *later* day than our clock (clock went backwards): never overwrite a newer salt
+    return null;
+  }
   return saltCache.salt;
 }
+// one-time cleanup of the short-lived DB table from 03934ed: zero the pages, flush the WAL
+db.pragma('secure_delete = ON');
+if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_salt'").get()) {
+  db.exec('DELETE FROM daily_salt; DROP TABLE daily_salt;');
+  db.pragma('wal_checkpoint(TRUNCATE)');
+}
 function visitorHash(siteId, ip, ua, day) {
-  return crypto.createHash('sha256').update(`${INGEST_SALT}|${saltFor(day)}|${day}|${siteId}|${ip}|${ua}`).digest('hex').slice(0, 24);
+  const salt = day === dayStr(Date.now()) ? todaysSalt() : null;
+  if (!salt) return crypto.randomBytes(12).toString('hex'); // unlinkable one-off visitor
+  return crypto.createHash('sha256').update(`${INGEST_SALT}|${salt}|${day}|${siteId}|${ip}|${ua}`).digest('hex').slice(0, 24);
 }
 function clientIp(req) {
   const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();

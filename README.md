@@ -207,7 +207,7 @@ cookie banner — the same approach as Plausible/Fathom.
 ## Privacy & security
 
 - No cookies, no cross-site tracking, **IPs never persisted**.
-- Daily one-way visitor hash with a **random salt per day that is deleted when the day ends**. Past days can't be re-linked afterwards, not even with the database, a known IP or user agent, or the server's own secrets.
+- Daily one-way visitor hash with a **random salt per day**. It lives in its own small file (`data/.day-salt`, mode 600), never in the database, and is overwritten in place when the next day starts. Past days can't be re-linked afterwards, not even with the database, a known IP or user agent, or the server's own secrets. Only the server clock picks the day; late or out-of-day events get an unlinkable one-off hash.
 - **Data minimisation:** set `DATA_RETENTION_DAYS` to auto-purge raw events after your chosen window.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
