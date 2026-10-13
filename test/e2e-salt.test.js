@@ -8,6 +8,9 @@
 //   PORT               → random high port on 127.0.0.1
 //   DIGEST_WEBHOOK_URL → 127.0.0.1:9 (discard), so a real webhook from .env can never fire
 //   DATA_RETENTION_DAYS→ 0
+//   INGEST_SALT, API_KEY, SESSION_SECRET → test values, so the live secrets from .env never
+//                        go into hashes or tokens here (an empty string would not help: the
+//                        loader treats '' as unset and fills it from .env)
 // The test never reads or writes the repo's data/ directory.
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -26,6 +29,7 @@ const ENV = {
   ...process.env,
   DB_PATH, PORT: String(PORT),
   DIGEST_WEBHOOK_URL: 'http://127.0.0.1:9/', DATA_RETENTION_DAYS: '0',
+  INGEST_SALT: 'e2e-test-salt', API_KEY: 'e2e-test-key', SESSION_SECRET: 'e2e-test-session',
   WEB_PASSWORD: 'e2e-' + Math.random().toString(36).slice(2),
 };
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
