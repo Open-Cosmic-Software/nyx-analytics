@@ -191,41 +191,11 @@ function parseUA(ua) {
 const TZ_COUNTRY = require('./tz-country.js');
 function countryFromTz(tz) { return (tz && TZ_COUNTRY[tz]) || null; }
 
-function dayStr(ts) { return new Date(ts).toISOString().slice(0, 10); }
-// Daily salt (13.10.2026, hardened after Tyto's review): a fresh random secret per UTC day.
-// Without it, anyone holding the DB and INGEST_SALT could recompute hashes for a known
-// IP + user agent and re-link a visitor across past days.
-// - It never touches the SQLite file. SQLite DELETE leaves bytes in free pages and the WAL;
-//   the salt lives in its own tiny file (data/.day-salt, 0600) that is overwritten in place
-//   with the next day's value — the old bytes are replaced, not unlinked and left behind.
-// - Only the server clock decides the day, and a salt is only ever created for *today*. A
-//   request for any other day (clock jump, late or offline-queued events) never creates or
-//   drops a salt; it gets a one-off random hash that links to nothing.
-// - Kept for the day so a restart doesn't split today's visitors.
+const { createDaySalt, dayStr } = require('./day-salt.js');
+// Daily salt: fresh random secret per UTC day in data/.day-salt (0600), never in the DB.
+// Rules and the single-process note live in day-salt.js.
 const SALT_FILE = path.join(path.dirname(DB_PATH), '.day-salt');
-let saltCache = { day: null, salt: null };
-function writeSaltInPlace(content) {
-  const buf = Buffer.alloc(128, 0); buf.write(content); // fixed size → the old value is fully overwritten
-  const fd = fs.openSync(SALT_FILE, fs.existsSync(SALT_FILE) ? 'r+' : 'w', 0o600);
-  try { fs.fchmodSync(fd, 0o600); fs.writeSync(fd, buf, 0, buf.length, 0); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-function todaysSalt() {
-  const today = dayStr(Date.now());
-  if (saltCache.day === today) return saltCache.salt;
-  let stored = null;
-  try { stored = fs.readFileSync(SALT_FILE, 'utf8').replace(/\0+$/, '').split(' '); } catch {}
-  if (stored && stored[0] === today && /^[0-9a-f]{64}$/.test(stored[1] || '')) {
-    saltCache = { day: today, salt: stored[1] };
-  } else if (!stored || !stored[0] || stored[0] < today) {
-    const salt = crypto.randomBytes(32).toString('hex');
-    writeSaltInPlace(`${today} ${salt}`); // overwrites yesterday's bytes
-    saltCache = { day: today, salt };
-  } else {
-    // file is from a *later* day than our clock (clock went backwards): never overwrite a newer salt
-    return null;
-  }
-  return saltCache.salt;
-}
+const todaysSalt = createDaySalt(SALT_FILE);
 // one-time cleanup of the short-lived DB table from 03934ed: zero the pages, flush the WAL
 db.pragma('secure_delete = ON');
 if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_salt'").get()) {

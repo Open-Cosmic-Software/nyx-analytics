@@ -208,6 +208,8 @@ cookie banner — the same approach as Plausible/Fathom.
 
 - No cookies, no cross-site tracking, **IPs never persisted**.
 - Daily one-way visitor hash with a **random salt per day**. It lives in its own small file (`data/.day-salt`, mode 600), never in the database, and is overwritten in place when the next day starts. Past days can't be re-linked afterwards, not even with the database, a known IP or user agent, or the server's own secrets. Only the server clock picks the day; late or out-of-day events get an unlinkable one-off hash.
+  - **Honest limits of "overwritten":** on ext4 an in-place overwrite really replaces the bytes. On copy-on-write filesystems (btrfs, ZFS), in filesystem or VM snapshots, and on SSDs (wear levelling) the old block can physically survive. **Backups of `data/` contain the salt of the day they were taken**, so treat them like the live server or exclude `data/.day-salt` from them.
+  - **One process only.** The salt is drawn by the single Node process. Running several processes against the same `data/` would let each draw its own salt at midnight.
 - **Data minimisation:** set `DATA_RETENTION_DAYS` to auto-purge raw events after your chosen window.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
