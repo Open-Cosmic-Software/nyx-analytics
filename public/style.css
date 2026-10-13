@@ -201,3 +201,14 @@ select:focus, input:focus { border-color: rgba(168,85,247,.5); }
 .funnel-nums .drop { color: #f87171; }
 .step-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; margin: 6px 0; }
 @media (max-width: 640px) { .funnel-step { grid-template-columns: 1fr; gap: 2px; } }
+
+/* ── 13.10.2026: comparison bar, commerce cards, shop insights ── */
+.compare { display: flex; flex-wrap: wrap; gap: 10px 28px; padding: 12px 18px; margin: 0 0 16px; font-size: .86rem; }
+.compare .k { color: var(--text-dim); margin-right: 8px; text-transform: uppercase; letter-spacing: .05em; font-size: .72rem; }
+.compare .up { color: var(--green); font-weight: 600; }
+.compare .down { color: var(--red); font-weight: 600; }
+.commerce { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin: 0 0 16px; }
+.hint { font-size: .74rem; font-weight: 400; margin-left: 6px; }
+p.hint { margin: -4px 0 8px; }
+.pay-note { margin: 10px 2px 0; font-size: .78rem; color: var(--text-dim); }
+.muted { color: var(--text-dim); }

@@ -206,6 +206,7 @@
   }
   wireTabs('pageTabs', 'pageTab', renderPagesPanel);
   wireTabs('srcTabs', 'srcTab', renderSourcesPanel);
+  wireTabs('searchTabs', 'searchTab', function () { renderSearch(); });
 
   // ── rendering ──
   function fmt(n) { n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }
@@ -309,10 +310,89 @@
     var s = lastStats; if (!s) return;
     bars('p-pages', s[state.pageTab] || s.pages, { filterKey: 'page', label: function (r) { return r.name; } });
   }
+  // readable names for app/short referrers — the raw host stays in the data and the tooltip
+  var SOURCE_NAMES = {
+    'com.google.android.googlequicksearchbox': 'Google App (Android)', 'com.google.android.gm': 'Gmail App',
+    'fb': 'Facebook', 'm.facebook.com': 'Facebook (mobile)', 'l.facebook.com': 'Facebook', 'lm.facebook.com': 'Facebook',
+    'ig': 'Instagram', 'l.instagram.com': 'Instagram', 'homescreen': 'Homescreen (app shortcut)',
+    'android-app://com.google.android.googlequicksearchbox': 'Google App (Android)', 't.co': 'X / Twitter',
+  };
+  function sourceLabel(n) { if (n === 'Direct') return '➜ Direct / none'; var nice = SOURCE_NAMES[n]; return nice ? nice + ' · ' + n : n; }
   function renderSourcesPanel() {
     var s = lastStats; if (!s) return;
     var tab = state.srcTab, fk = tab === 'mediums' ? 'medium' : tab === 'campaigns' ? 'campaign' : 'source';
-    bars('p-sources', s[tab] || [], { filterKey: fk, label: function (r) { return tab === 'sources' && r.name === 'Direct' ? '➜ Direct / none' : r.name; } });
+    bars('p-sources', s[tab] || [], { filterKey: fk, label: function (r) { return tab === 'sources' ? sourceLabel(r.name) : r.name; } });
+    var el = $('p-sources');
+    if (tab === 'sources' && s.paymentReturns && s.paymentReturns.length) {
+      var n = s.paymentReturns.reduce(function (a, r) { return a + (r.visitors || 0); }, 0);
+      var who = s.paymentReturns.map(function (r) { return r.name; }).join(', ');
+      el.insertAdjacentHTML('beforeend', '<p class="pay-note" title="' + esc(who) + '">💳 ' + fmt(n) + ' returning from payment (' + esc(who) + ') — not counted as a source</p>');
+    }
+  }
+
+  function money(v, cur) {
+    try { return new Intl.NumberFormat(navigator.language || 'de-DE', { style: 'currency', currency: cur || 'EUR', maximumFractionDigits: v >= 1000 ? 0 : 2 }).format(v); }
+    catch (e) { return (Math.round(v * 100) / 100) + ' ' + (cur || ''); }
+  }
+  function pctTxt(p) { return p == null ? '—' : (p >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '%'; }
+  function pctCls(p) { return p == null ? '' : (p >= 0 ? 'up' : 'down'); }
+
+  function renderCompare(s) {
+    var el = $('compare'); if (!s.previous) { el.classList.add('hide'); return; }
+    el.classList.remove('hide');
+    var prev = '<div><span class="k">vs previous period</span>' +
+      '<span class="' + pctCls(s.trend.visitors) + '">' + pctTxt(s.trend.visitors) + ' visitors</span> <span class="muted">(' + fmt(s.previous.visitors) + ' before)</span>' +
+      ' · <span class="' + pctCls(s.trend.pageviews) + '">' + pctTxt(s.trend.pageviews) + ' views</span></div>';
+    var yoy = s.yoy
+      ? '<div><span class="k">vs same period last year</span><span class="' + pctCls(s.yoy.visitors) + '">' + pctTxt(s.yoy.visitors) + ' visitors</span> <span class="muted">(' + fmt(s.yoy.was.visitors) + ' then)</span>' +
+        ' · <span class="' + pctCls(s.yoy.pageviews) + '">' + pctTxt(s.yoy.pageviews) + ' views</span></div>'
+      : '<div><span class="k">vs same period last year</span><span class="muted">available once data reaches back a year (tracking since ' + esc(s.dataSince || '—') + ')</span></div>';
+    el.innerHTML = prev + yoy;
+  }
+
+  function renderInsights(s) {
+    renderCompare(s);
+    // commerce cards + revenue by source
+    var c = s.commerce, cw = $('commerce');
+    if (c) {
+      cw.classList.remove('hide');
+      $('c-revenue').textContent = money(c.revenue);
+      $('c-orders').textContent = fmt(c.orders);
+      $('c-aov').textContent = money(c.aov);
+      $('c-cr').textContent = c.cr + '%';
+      trend('tc-revenue', c.trend && c.trend.revenue);
+      trend('tc-orders', c.trend && c.trend.orders);
+      $('w-revsrc').classList.remove('hide');
+      var maxR = Math.max.apply(null, c.bySource.map(function (r) { return r.revenue; }).concat([1]));
+      $('p-revsrc').innerHTML = c.bySource.map(function (r) {
+        var w = Math.max(3, Math.round((r.revenue / maxR) * 100));
+        return '<div class="bar" title="' + esc(r.name) + '"><div class="fill" style="width:' + w + '%"></div><span class="name">' + esc(sourceLabel(r.name)) + '</span><span class="val">' + money(r.revenue) + '<span class="cr">' + r.orders + '×</span></span></div>';
+      }).join('') || '<div class="empty">No data yet</div>';
+    } else { cw.classList.add('hide'); $('w-revsrc').classList.add('hide'); }
+    // site search
+    if (s.search) {
+      $('w-search').classList.remove('hide');
+      $('searchMeta').textContent = fmt(s.search.total) + ' searches · ' + s.search.zeroShare + '% without results';
+      renderSearch();
+    } else $('w-search').classList.add('hide');
+    // 404
+    if (s.notFound && s.notFound.length) {
+      $('w-404').classList.remove('hide');
+      bars('p-404', s.notFound, { label: function (r) { return r.name + (r.fromPage ? '  ← ' + r.fromPage : ''); } });
+    } else $('w-404').classList.add('hide');
+    // scroll depth
+    if (s.scrollPages && s.scrollPages.length) {
+      $('w-scroll').classList.remove('hide');
+      $('p-scroll').innerHTML = s.scrollPages.map(function (r) {
+        return '<div class="bar" title="' + esc(r.name) + ' — ' + r.pageviews + ' measured views"><div class="fill" style="width:' + Math.max(3, r.avg) + '%"></div><span class="name">' + esc(r.name) + '</span><span class="val">' + r.avg + '%<span class="cr">' + r.deep + '% deep</span></span></div>';
+      }).join('');
+    } else $('w-scroll').classList.add('hide');
+  }
+  state.searchTab = 'top';
+  function renderSearch() {
+    var s = lastStats; if (!s || !s.search) return;
+    var rows = s.search[state.searchTab] || [];
+    bars('p-search', rows, { label: function (r) { return '“' + r.name + '”' + (state.searchTab === 'top' && r.zero ? '  ⚠ ' + r.zero + '× no results' : ''); } });
   }
   function renderProps(s) {
     var wrap = $('propsWrap');
@@ -359,6 +439,7 @@
       bars('p-languages', s.languages, { filterKey: 'lang' });
       bars('p-goals', s.goals, { filterKey: 'goal', cr: true, label: function (r) { return '🎯 ' + r.name; } });
       renderProps(s);
+      renderInsights(s);
       loadJourneys();
       loadFunnels();
     });

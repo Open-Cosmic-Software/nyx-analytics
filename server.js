@@ -67,6 +67,7 @@ ensureColumn('utm_medium', 'TEXT'); // campaign medium (utm_medium)
 ensureColumn('utm_campaign', 'TEXT'); // campaign name (utm_campaign)
 ensureColumn('dur', 'INTEGER'); // engagement seconds (set by a follow-up beacon on page leave)
 ensureColumn('props', 'TEXT'); // custom event properties, JSON object as text
+ensureColumn('scroll', 'INTEGER'); // max scroll depth in % (set by the engagement beacon)
 
 // share links + funnels live in their own small tables (additive, safe on old installs)
 db.exec(`
@@ -74,6 +75,13 @@ db.exec(`
     token TEXT PRIMARY KEY,
     site_id INTEGER NOT NULL,
     created INTEGER NOT NULL
+  );
+  -- visitors that touched an internal path (CMS preview etc.) are skipped for the rest of that day
+  CREATE TABLE IF NOT EXISTS internal_vh (
+    site_id INTEGER NOT NULL,
+    vh TEXT NOT NULL,
+    day TEXT NOT NULL,
+    PRIMARY KEY (site_id, vh, day)
   );
   CREATE TABLE IF NOT EXISTS funnels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,9 +99,38 @@ const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
 const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, utm_medium, utm_campaign, dur, props, vh)
   VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @utm_medium, @utm_campaign, @dur, @props, @vh)`);
 // engagement: attach a visit duration (seconds) to the visitor's most recent pageview for that path.
-const updDur = db.prepare(`UPDATE events SET dur = @dur WHERE id = (
+const updDur = db.prepare(`UPDATE events SET dur = MAX(COALESCE(dur, 0), @dur), scroll = CASE WHEN @scroll IS NULL THEN scroll ELSE MAX(COALESCE(scroll, 0), @scroll) END WHERE id = (
   SELECT id FROM events WHERE site_id = @site_id AND vh = @vh AND name IS NULL AND path = @path AND ts >= @since
-  ORDER BY id DESC LIMIT 1) AND (dur IS NULL OR dur < @dur)`);
+  ORDER BY id DESC LIMIT 1)`);
+
+// ── internal traffic (13.10.2026) ────────────────────────────────────────────
+// Paths that only the shop team opens (CMS preview, admin). A visitor who hits one is
+// treated as internal for the rest of that day and no longer counted. Per-domain list,
+// extend via INTERNAL_PATHS="domain:/prefix,domain:/prefix2".
+const INTERNAL_PATHS = { 'pastaclean.tv': ['/rhweb/', '/admin', '/widgets/'] };
+for (const part of String(process.env.INTERNAL_PATHS || '').split(',')) {
+  const [d, pre] = part.split(':');
+  if (d && pre) (INTERNAL_PATHS[d.trim()] || (INTERNAL_PATHS[d.trim()] = [])).push(pre.trim());
+}
+function backfillInternal() {
+  for (const [d, prefixes] of Object.entries(INTERNAL_PATHS)) {
+    const site = db.prepare('SELECT id FROM sites WHERE domain = ?').get(d);
+    if (!site) continue;
+    for (const pre of prefixes) {
+      db.prepare(`INSERT OR IGNORE INTO internal_vh (site_id, vh, day) SELECT DISTINCT site_id, vh, day FROM events WHERE site_id = ? AND path >= ? AND path < ?`).run(site.id, pre, pre + '\uffff');
+    }
+  }
+}
+const insInternal = db.prepare('INSERT OR IGNORE INTO internal_vh (site_id, vh, day) VALUES (?, ?, ?)');
+const isInternal = db.prepare('SELECT 1 FROM internal_vh WHERE site_id = ? AND vh = ? AND day = ?');
+
+// ── payment providers (13.10.2026) ───────────────────────────────────────────
+// Customers coming back from PayPal/Klarna are not a traffic source. Raw rows keep the
+// host (no data loss); the sources panel hides them and shows them as a separate note.
+const PAYMENT_HOSTS = ['paypal.com', 'klarna.com', 'js.klarna.com', 'x.klarnacdn.net', 'mollie.com', 'pay.amazon.com', 'payments.amazon.de', 'payments.amazon.com', 'stripe.com', 'checkout.stripe.com', 'sofort.com', 'giropay.de', 'paydirekt.de', 'ideal.nl', 'pay.google.com', 'unzer.com', 'computop-paygate.com', 'secure.ogone.com', 'ratepay.com', 'pay.payone.com', 'mollie.ideal.nl'];
+backfillInternal();
+const PAYMENT_SQL = PAYMENT_HOSTS.map(() => '?').join(',');
+function isPaymentHost(h) { return PAYMENT_HOSTS.includes(h) || /(^|\.)(paypal|klarna|mollie|stripe|sofort|giropay|unzer|ratepay|payone)\./.test(h); }
 
 // Custom event properties stay developer-defined and small — never a place for PII to pile up.
 function sanitizeProps(raw) {
@@ -199,10 +236,16 @@ function collect(req, res) {
   const ip = clientIp(req);
   const vh = visitorHash(site.id, ip, req.headers['user-agent'] || '', day);
 
-  // engagement beacon: attach a visit duration to the visitor's latest pageview (no new row).
+  // internal visitor (CMS preview etc.): mark for the day and drop everything from them.
+  const intern = INTERNAL_PATHS[domain] || [];
+  if (intern.some((pre) => pth.startsWith(pre))) { insInternal.run(site.id, vh, day); return res.status(204).end(); }
+  if (isInternal.get(site.id, vh, day)) return res.status(204).end();
+
+  // engagement beacon: attach a visit duration (+ max scroll depth) to the visitor's latest pageview (no new row).
   if (b.e === 'engagement') {
     const dur = Math.max(0, Math.min(7200, parseInt(b.dur, 10) || 0)); // cap at 2h
-    if (dur > 0) updDur.run({ site_id: site.id, vh, path: pth, dur, since: ts - 6 * 3600000 });
+    const sc = b.sc == null || b.sc === '' ? null : Math.max(0, Math.min(100, parseInt(b.sc, 10) || 0));
+    if (dur > 0 || sc != null) updDur.run({ site_id: site.id, vh, path: pth, dur, scroll: sc, since: ts - 6 * 3600000 });
     return res.status(204).end();
   }
 
@@ -351,7 +394,7 @@ function statsHandler(req, res) {
 
   // pageview WHERE = time window + segmentation filters. A goal filter narrows the visitor
   // set to those who fired that event in-range (so every breakdown reflects converters only).
-  let where = 'site_id = ? AND ts >= ? AND ts < ? AND name IS NULL';
+  let where = 'site_id = ? AND ts >= ? AND ts < ? AND name IS NULL AND NOT EXISTS (SELECT 1 FROM internal_vh i WHERE i.site_id = events.site_id AND i.vh = events.vh AND i.day = events.day)';
   const args = [sid, start, end, ...params];
   if (clauses.length) where += ' AND ' + clauses.join(' AND ');
   if (goal) { where += ' AND vh IN (SELECT vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = ?)'; args.push(sid, start, end, goal); }
@@ -390,6 +433,17 @@ function statsHandler(req, res) {
     });
   }
 
+  // previous year: same window shifted by 364 days (same weekdays). Null until data reaches back that far.
+  const yoyStart = start - 364 * 864e5, yoyEnd = end - 364 * 864e5;
+  const firstTs = db.prepare('SELECT MIN(ts) t FROM events WHERE site_id = ?').get(sid).t;
+  let yoy = null;
+  if (firstTs != null && firstTs <= yoyStart) {
+    const ya = args.slice(); ya[1] = yoyStart; ya[2] = yoyEnd;
+    if (goal) { ya[ya.length - 3] = yoyStart; ya[ya.length - 2] = yoyEnd; }
+    const y = db.prepare(`SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE ${where}`).get(...ya);
+    yoy = { visitors: pct(totals.visitors, y.visitors), pageviews: pct(totals.pageviews, y.pageviews), was: y };
+  }
+
   const topBy = (col, limit = 8) => db.prepare(
     `SELECT ${col} AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY visitors DESC, pageviews DESC LIMIT ${limit}`,
   ).all(...args);
@@ -426,17 +480,105 @@ function statsHandler(req, res) {
     }));
   }
 
+  // sources without payment providers (returning customers, not traffic) — shown separately
+  // one source query; payment providers (returning customers, not traffic) are split off
+  const srcAll = db.prepare(
+    `SELECT source AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND source IS NOT NULL AND source != '' GROUP BY source ORDER BY visitors DESC, pageviews DESC LIMIT 40`,
+  ).all(...args);
+  const sourcesClean = srcAll.filter((r) => !isPaymentHost(r.name)).slice(0, 8);
+  const paymentReturns = srcAll.filter((r) => isPaymentHost(r.name));
+
+  // ── commerce (event "Purchase" with props.value) ──
+  const purchases = db.prepare(
+    `SELECT vh, day, CAST(json_extract(props, '$.value') AS REAL) AS value FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Purchase'`,
+  ).all(sid, start, end);
+  let commerce = null;
+  if (purchases.length) {
+    // first non-payment source per buying visit (vh, day) — one query instead of one per order
+    const keys = [...new Set(purchases.map((x) => x.vh + '|' + x.day))];
+    const days = [...new Set(purchases.map((x) => x.day))];
+    const srcRows = db.prepare(
+      `SELECT vh, day, source FROM (
+         SELECT vh, day, source, ROW_NUMBER() OVER (PARTITION BY vh, day ORDER BY ts, id) rn
+         FROM events WHERE site_id = ? AND day IN (${days.map(() => '?').join(',')}) AND name IS NULL AND source NOT IN (${PAYMENT_SQL})
+           AND vh IN (SELECT vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Purchase')
+       ) WHERE rn = 1`,
+    ).all(sid, ...days, ...PAYMENT_HOSTS, sid, start, end);
+    const srcOf = new Map(srcRows.map((r) => [r.vh + '|' + r.day, r.source]));
+    void keys;
+    const bySrc = new Map();
+    let revenue = 0;
+    for (const pch of purchases) {
+      const v = Number.isFinite(pch.value) ? pch.value : 0;
+      revenue += v;
+      const src = srcOf.get(pch.vh + '|' + pch.day) || 'Direct';
+      const e = bySrc.get(src) || { name: src, orders: 0, revenue: 0 };
+      e.orders++; e.revenue += v; bySrc.set(src, e);
+    }
+    const prevRev = db.prepare(
+      `SELECT COUNT(*) n, SUM(CAST(json_extract(props, '$.value') AS REAL)) r FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Purchase'`,
+    ).get(sid, start - len, start);
+    const orders = purchases.length;
+    commerce = {
+      orders, revenue: +revenue.toFixed(2), aov: +(revenue / orders).toFixed(2),
+      cr: totals.visitors ? +((new Set(purchases.map((x) => x.vh + x.day)).size / totals.visitors) * 100).toFixed(2) : 0,
+      // no trend against a near-empty baseline (e.g. the week tracking started) — a % of almost nothing is noise
+      trend: prevRev.n >= 5 ? { orders: pct(orders, prevRev.n), revenue: pct(revenue, prevRev.r || 0) } : { orders: null, revenue: null },
+      bySource: [...bySrc.values()].map((x) => ({ ...x, revenue: +x.revenue.toFixed(2), visitors: x.orders })).sort((a, b) => b.revenue - a.revenue).slice(0, 10),
+    };
+  }
+
+  // ── site search (event "Search" with props.q + props.results) ──
+  const searchRows = db.prepare(
+    `SELECT LOWER(TRIM(json_extract(props, '$.q'))) q, CAST(json_extract(props, '$.results') AS INTEGER) n, vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Search' AND props IS NOT NULL`,
+  ).all(sid, start, end);
+  let search = null;
+  if (searchRows.length) {
+    const agg = new Map();
+    for (const r of searchRows) {
+      if (!r.q) continue;
+      const e = agg.get(r.q) || { name: r.q, searches: 0, zero: 0, vhs: new Set() };
+      e.searches++; if (r.n === 0) e.zero++; e.vhs.add(r.vh); agg.set(r.q, e);
+    }
+    const all = [...agg.values()].map((e) => ({ name: e.name, pageviews: e.searches, visitors: e.vhs.size, zero: e.zero }));
+    search = {
+      total: searchRows.length,
+      zeroShare: +((searchRows.filter((r) => r.n === 0).length / searchRows.length) * 100).toFixed(1),
+      top: all.slice().sort((a, b) => b.pageviews - a.pageviews).slice(0, 10),
+      zeroResults: all.filter((e) => e.zero > 0).sort((a, b) => b.zero - a.zero).slice(0, 10).map((e) => ({ ...e, pageviews: e.zero, visitors: e.zero })),
+    };
+  }
+
+  // ── broken pages (event "404" with props.url / props.from) ──
+  const notFound = db.prepare(
+    `SELECT json_extract(props, '$.url') AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors, MAX(json_extract(props, '$.from')) AS fromPage FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = '404' GROUP BY name ORDER BY pageviews DESC LIMIT 10`,
+  ).all(sid, start, end);
+
+  // ── scroll depth per page (pages with enough measured views) ──
+  const scrollPages = db.prepare(
+    `SELECT path AS name, COUNT(*) AS pageviews, ROUND(AVG(scroll)) AS avg, ROUND(100.0 * SUM(scroll >= 75) / COUNT(*)) AS deep FROM events WHERE ${where} AND scroll IS NOT NULL GROUP BY path HAVING COUNT(*) >= 5 ORDER BY pageviews DESC LIMIT 10`,
+  ).all(...args).map((r) => ({ ...r, visitors: r.pageviews }));
+
   res.json({
     site: { domain: site.domain, name: site.name },
     period, range: { from: new Date(start).toISOString().slice(0, 10), to: new Date(end - 1).toISOString().slice(0, 10) },
     filters: Object.assign({}, ...Object.keys(FILTER_COLS).filter((k) => req.query[k]).map((k) => ({ [k]: req.query[k] })), goal ? { goal } : {}),
     totals: { visitors: totals.visitors, pageviews: totals.pageviews, bounce, viewsPerVisitor, duration },
     trend: { visitors: pct(totals.visitors, prev.visitors), pageviews: pct(totals.pageviews, prev.pageviews) },
+    previous: { visitors: prev.visitors, pageviews: prev.pageviews },
+    yoy,
+    dataSince: firstTs ? new Date(firstTs).toISOString().slice(0, 10) : null,
     series,
     pages: topBy('path', 10),
     entryPages: edge('ASC', 8),
     exitPages: edge('DESC', 8),
-    sources: topBy('source', 8),
+    sources: sourcesClean,
+    sourcesAll: srcAll.slice(0, 8),
+    paymentReturns,
+    commerce,
+    search,
+    notFound,
+    scrollPages,
     mediums: topBy('utm_medium', 8),
     campaigns: topBy('utm_campaign', 8),
     countries: topBy('country', 8),

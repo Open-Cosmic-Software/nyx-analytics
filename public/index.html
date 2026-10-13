@@ -77,6 +77,17 @@
       <div class="card stat"><div class="label">Avg. visit time</div><div class="value" id="s-dur">—</div></div>
     </div>
 
+    <!-- period comparison: previous period + same period last year (13.10.2026) -->
+    <div class="card compare hide" id="compare"></div>
+
+    <!-- commerce (Purchase events) -->
+    <div class="commerce hide" id="commerce">
+      <div class="card stat"><div class="label">Revenue</div><div class="value grad-text" id="c-revenue">—</div><span class="trend" id="tc-revenue"></span></div>
+      <div class="card stat"><div class="label">Orders</div><div class="value" id="c-orders">—</div><span class="trend" id="tc-orders"></span></div>
+      <div class="card stat"><div class="label">Avg. order value</div><div class="value" id="c-aov">—</div></div>
+      <div class="card stat"><div class="label">Conversion rate</div><div class="value" id="c-cr">—</div></div>
+    </div>
+
     <div class="card chart-card">
       <div class="chart-head">
         <strong id="chartTitle">Visitors</strong>
@@ -115,6 +126,16 @@
       <div class="card panel"><h3><span class="em">📱</span> Devices</h3><div class="bars" id="p-devices"></div></div>
       <div class="card panel"><h3><span class="em">🎯</span> Goals &amp; conversions</h3><div class="bars" id="p-goals"></div></div>
       <div class="card panel"><h3><span class="em">🗣️</span> Languages</h3><div class="bars" id="p-languages"></div></div>
+    </div>
+
+    <!-- shop insights: revenue by source, site search, broken pages, scroll depth (13.10.2026) -->
+    <div class="panels" id="insights" style="margin-top:16px">
+      <div class="card panel hide" id="w-revsrc"><h3><span class="em">💶</span> Revenue by source <span class="muted hint">first source of the buying visit</span></h3><div class="bars" id="p-revsrc"></div></div>
+      <div class="card panel hide" id="w-search"><h3><span class="em">🔎</span> Site search
+          <span class="tabs" id="searchTabs"><button data-t="top" class="active">Top</button><button data-t="zeroResults">No results</button></span>
+        </h3><p class="muted hint" id="searchMeta"></p><div class="bars" id="p-search"></div></div>
+      <div class="card panel hide" id="w-404"><h3><span class="em">🧱</span> Broken pages (404)</h3><div class="bars" id="p-404"></div></div>
+      <div class="card panel hide" id="w-scroll"><h3><span class="em">📜</span> Scroll depth <span class="muted hint">avg · share reaching 75 %</span></h3><div class="bars" id="p-scroll"></div></div>
     </div>
 
     <!-- visitor journeys (sankey) -->
