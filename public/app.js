@@ -337,17 +337,15 @@
   function pctTxt(p) { return p == null ? '—' : (p >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '%'; }
   function pctCls(p) { return p == null ? '' : (p >= 0 ? 'up' : 'down'); }
 
+  // previous-period trend already sits in the stat cards; last year only appears once data reaches back that far
   function renderCompare(s) {
-    var el = $('compare'); if (!s.previous) { el.classList.add('hide'); return; }
-    el.classList.remove('hide');
-    var prev = '<div><span class="k">vs previous period</span>' +
-      '<span class="' + pctCls(s.trend.visitors) + '">' + pctTxt(s.trend.visitors) + ' visitors</span> <span class="muted">(' + fmt(s.previous.visitors) + ' before)</span>' +
-      ' · <span class="' + pctCls(s.trend.pageviews) + '">' + pctTxt(s.trend.pageviews) + ' views</span></div>';
-    var yoy = s.yoy
-      ? '<div><span class="k">vs same period last year</span><span class="' + pctCls(s.yoy.visitors) + '">' + pctTxt(s.yoy.visitors) + ' visitors</span> <span class="muted">(' + fmt(s.yoy.was.visitors) + ' then)</span>' +
-        ' · <span class="' + pctCls(s.yoy.pageviews) + '">' + pctTxt(s.yoy.pageviews) + ' views</span></div>'
-      : '<div><span class="k">vs same period last year</span><span class="muted">available once data reaches back a year (tracking since ' + esc(s.dataSince || '—') + ')</span></div>';
-    el.innerHTML = prev + yoy;
+    ['visitors', 'pageviews'].forEach(function (k) {
+      var el = $('y-' + k); if (!el) return;
+      if (!s.yoy || s.yoy[k] == null) { el.classList.add('hide'); el.textContent = ''; return; }
+      el.classList.remove('hide');
+      el.className = 'yoy ' + pctCls(s.yoy[k]);
+      el.textContent = pctTxt(s.yoy[k]) + ' vs last year';
+    });
   }
 
   function renderInsights(s) {

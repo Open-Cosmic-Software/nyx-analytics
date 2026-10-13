@@ -212,3 +212,5 @@ select:focus, input:focus { border-color: rgba(168,85,247,.5); }
 p.hint { margin: -4px 0 8px; }
 .pay-note { margin: 10px 2px 0; font-size: .78rem; color: var(--text-dim); }
 .muted { color: var(--text-dim); }
+.yoy { display: block; margin-top: 4px; font-size: .72rem; color: var(--text-dim); }
+.yoy.up { color: var(--green); } .yoy.down { color: var(--red); }
