@@ -1,0 +1,3 @@
+tags:
+  e2e:
+    skip: "live server test — run with NYX_E2E=<url> flutter test --tags e2e --run-skipped"

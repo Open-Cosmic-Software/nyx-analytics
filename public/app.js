@@ -15,7 +15,7 @@
   } catch (e) { /* corrupt value → keep both visible */ }
   var lastStats = null;
   // dashboard segmentation filters (whitelist mirrors the server's FILTER_COLS + goal)
-  var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', goal: 'Goal' };
+  var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', platform: 'Platform', version: 'App version', goal: 'Goal' };
 
   // build the stats/realtime query string from the current site, period/range and active filters
   function statsQuery() {
@@ -166,7 +166,7 @@
       var loc = e.country ? flag(e.country) : '🌐';
       var what = e.name ? '<span class="goal">🎯 ' + esc(e.name) + '</span>' : '<span class="path">' + esc(e.path) + '</span>';
       var src = (e.source && e.source !== 'Direct') ? '↗ ' + e.source : '';
-      var meta = [e.browser, e.device, src].filter(Boolean).map(esc).join(' · ');
+      var meta = [e.platform ? platformLabel(e.platform) : e.browser, e.device, src].filter(Boolean).map(esc).join(' · ');
       return '<div class="feed-row"><span class="fl" title="' + esc(e.country || e.tz || '') + '">' + loc + '</span>' +
         '<div class="fw">' + what + '<span class="fm">' + meta + '</span></div>' +
         '<span class="ft">' + timeAgo(e.ts, now) + '</span></div>';
@@ -207,6 +207,7 @@
   wireTabs('pageTabs', 'pageTab', renderPagesPanel);
   wireTabs('srcTabs', 'srcTab', renderSourcesPanel);
   wireTabs('searchTabs', 'searchTab', function () { renderSearch(); });
+  wireTabs('pfTabs', 'pfTab', function () { renderPlatformsPanel(); });
 
   // ── rendering ──
   function fmt(n) { n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }
@@ -317,6 +318,19 @@
     'ig': 'Instagram', 'l.instagram.com': 'Instagram', 'homescreen': 'Homescreen (app shortcut)',
     'android-app://com.google.android.googlequicksearchbox': 'Google App (Android)', 't.co': 'X / Twitter',
   };
+  var PLATFORM_NAMES = { web: '🌐 Web', android: '🤖 Android app', ios: '🍏 iOS app', macos: '💻 macOS app', windows: '🪟 Windows app', linux: '🐧 Linux app' };
+  function platformLabel(n) { return PLATFORM_NAMES[n] || n; }
+  state.pfTab = 'platforms';
+  function renderPlatformsPanel() {
+    var s = lastStats; if (!s) return;
+    var w = $('w-platforms');
+    // only interesting once an app reports — a site that is web-only keeps its old layout
+    var hasApp = (s.platforms || []).some(function (r) { return r.name !== 'web'; }) || state.filters.platform;
+    if (!hasApp) { w.classList.add('hide'); return; }
+    w.classList.remove('hide');
+    if (state.pfTab === 'appVersions') bars('p-platforms', s.appVersions || [], { filterKey: 'version', label: function (r) { return 'v' + r.name; } });
+    else bars('p-platforms', s.platforms || [], { filterKey: 'platform', label: function (r) { return platformLabel(r.name); } });
+  }
   function sourceLabel(n) { if (n === 'Direct') return '➜ Direct / none'; var nice = SOURCE_NAMES[n]; return nice ? nice + ' · ' + n : n; }
   function renderSourcesPanel() {
     var s = lastStats; if (!s) return;
@@ -361,12 +375,22 @@
       trend('tc-revenue', c.trend && c.trend.revenue);
       trend('tc-orders', c.trend && c.trend.orders);
       $('w-revsrc').classList.remove('hide');
+      var pfs = c.byPlatform || [];
+      if (pfs.some(function (r) { return r.name !== 'web'; })) {
+        $('w-revpf').classList.remove('hide');
+        var maxP = Math.max.apply(null, pfs.map(function (r) { return r.revenue; }).concat([1]));
+        $('p-revpf').innerHTML = pfs.map(function (r) {
+          var w = Math.max(3, Math.round((r.revenue / maxP) * 100));
+          return '<div class="bar clickable" data-fk="platform" data-fv="' + esc(r.name) + '"><div class="fill" style="width:' + w + '%"></div><span class="name">' + esc(platformLabel(r.name)) + '</span><span class="val">' + money(r.revenue) + '<span class="cr">' + r.orders + '×</span></span></div>';
+        }).join('');
+        Array.prototype.forEach.call($('p-revpf').querySelectorAll('.bar.clickable'), function (b) { b.onclick = function () { setFilter('platform', b.getAttribute('data-fv')); }; });
+      } else $('w-revpf').classList.add('hide');
       var maxR = Math.max.apply(null, c.bySource.map(function (r) { return r.revenue; }).concat([1]));
       $('p-revsrc').innerHTML = c.bySource.map(function (r) {
         var w = Math.max(3, Math.round((r.revenue / maxR) * 100));
         return '<div class="bar" title="' + esc(r.name) + '"><div class="fill" style="width:' + w + '%"></div><span class="name">' + esc(sourceLabel(r.name)) + '</span><span class="val">' + money(r.revenue) + '<span class="cr">' + r.orders + '×</span></span></div>';
       }).join('') || '<div class="empty">No data yet</div>';
-    } else { cw.classList.add('hide'); $('w-revsrc').classList.add('hide'); }
+    } else { cw.classList.add('hide'); $('w-revsrc').classList.add('hide'); $('w-revpf').classList.add('hide'); }
     // site search
     if (s.search) {
       $('w-search').classList.remove('hide');
@@ -434,6 +458,7 @@
       bars('p-browsers', s.browsers, { filterKey: 'browser' });
       bars('p-os', s.os, { filterKey: 'os' });
       bars('p-devices', s.devices, { filterKey: 'device' });
+      renderPlatformsPanel();
       bars('p-languages', s.languages, { filterKey: 'lang' });
       bars('p-goals', s.goals, { filterKey: 'goal', cr: true, label: function (r) { return '🎯 ' + r.name; } });
       renderProps(s);

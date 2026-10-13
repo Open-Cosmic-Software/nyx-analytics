@@ -100,6 +100,44 @@ Opt-in flags on the `<script>` tag:
         src="https://analytics.example.com/nyx.js"></script>
 ```
 
+## Mobile & desktop apps
+
+Track your **native app in the same dashboard as your website**. Every row gets a platform
+(`web`, `android`, `ios`, `macos`, `windows`, `linux`), so you can see everything together or
+click a platform to filter. Once an app reports in, you get a **Platforms** panel (plus app
+versions) and **Revenue by platform**.
+
+**Flutter** — a ready-made package lives in [`sdk/flutter`](sdk/flutter):
+
+```dart
+NyxAnalytics.init(endpoint: 'https://analytics.example.com', domain: 'example.com', appVersion: '1.4.0');
+NyxAnalytics.instance.setEnabled(userConsented);       // off until you say so — wire it to your consent
+MaterialApp(navigatorObservers: [NyxRouteObserver()]); // automatic screen views
+NyxAnalytics.instance.search('vinegar', 6);
+NyxAnalytics.instance.purchase(value: 49.90, currency: 'EUR', items: 2);
+```
+
+**Any other stack** (Swift, Kotlin, React Native, …) — it is one JSON `POST /api/collect`:
+
+| field | meaning |
+|---|---|
+| `d` | site domain (as registered) |
+| `p` | screen, written like a path (`/product/42`) |
+| `pf` | platform: `android` · `ios` · `macos` · `windows` · `linux` |
+| `sid` | random id drawn **per app launch**, kept in memory only (16–64 chars `A-Za-z0-9_-`) |
+| `av` | app version (optional) |
+| `dv` | `mobile` · `tablet` · `desktop` (optional) |
+| `l` / `cc` | language tag / 2-letter region of the device locale (optional) |
+| `n` / `pr` | event name + flat properties, same as the web `nyx()` call (optional) |
+| `s` / `um` / `uc` | utm source / medium / campaign, e.g. from a deep link (optional) |
+
+Send any non-empty, non-bot `User-Agent` (e.g. `MyApp/1.4 (android)`).
+
+Privacy stays the same as on the web: **no device or advertising id, no cookies, no IP stored.**
+The server hashes the launch id with a daily salt, so a visitor is never followed across days.
+Without `sid`, the usual IP + user-agent daily hash is used. Region comes from the timezone or
+device locale, never from IP geolocation.
+
 ## Live visitors
 
 Click **“● online now”** for a realtime view: a 30-minute pulse and a live feed of

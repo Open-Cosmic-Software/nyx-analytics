@@ -68,6 +68,8 @@ ensureColumn('utm_campaign', 'TEXT'); // campaign name (utm_campaign)
 ensureColumn('dur', 'INTEGER'); // engagement seconds (set by a follow-up beacon on page leave)
 ensureColumn('props', 'TEXT'); // custom event properties, JSON object as text
 ensureColumn('scroll', 'INTEGER'); // max scroll depth in % (set by the engagement beacon)
+ensureColumn('platform', 'TEXT'); // NULL = web (tracker script); native SDKs send android / ios / …
+ensureColumn('app_version', 'TEXT'); // app build reported by native SDKs, NULL for web
 
 // share links + funnels live in their own small tables (additive, safe on old installs)
 db.exec(`
@@ -96,8 +98,8 @@ const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
 const insSite = db.prepare('INSERT OR IGNORE INTO sites (domain, name, created) VALUES (?, ?, ?)');
 const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
-const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, utm_medium, utm_campaign, dur, props, vh)
-  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @utm_medium, @utm_campaign, @dur, @props, @vh)`);
+const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, utm_medium, utm_campaign, dur, props, vh, platform, app_version)
+  VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @utm_medium, @utm_campaign, @dur, @props, @vh, @platform, @app_version)`);
 // engagement: attach a visit duration (seconds) to the visitor's most recent pageview for that path.
 const updDur = db.prepare(`UPDATE events SET dur = MAX(COALESCE(dur, 0), @dur), scroll = CASE WHEN @scroll IS NULL THEN scroll ELSE MAX(COALESCE(scroll, 0), @scroll) END WHERE id = (
   SELECT id FROM events WHERE site_id = @site_id AND vh = @vh AND name IS NULL AND path = @path AND ts >= @since
@@ -149,6 +151,17 @@ function sanitizeProps(raw) {
   if (!keys.length) return null;
   const json = JSON.stringify(out);
   return json.length > 800 ? null : json; // hard cap on total size
+}
+
+// ── native apps (13.10.2026) ────────────────────────────────────────────────
+// Apps send the same beacon as the web tracker plus `pf` (platform) and optionally `av`
+// (app version), `dv` (mobile|tablet) and `cc` (2-letter region of the device locale, used
+// only when the timezone gives no country). Web rows keep platform NULL, so old data is web.
+const APP_PLATFORMS = { android: 'Android', ios: 'iOS', ipados: 'iOS', macos: 'macOS', windows: 'Windows', linux: 'Linux' };
+const PLATFORM_SQL = "COALESCE(platform, 'web')";
+function appPlatform(b) {
+  const pf = String(b.pf || b.platform || '').toLowerCase().trim();
+  return Object.prototype.hasOwnProperty.call(APP_PLATFORMS, pf) ? (pf === 'ipados' ? 'ios' : pf) : null;
 }
 
 // ── UA parsing + bot filter ─────────────────────────────────────────────────
@@ -225,7 +238,15 @@ function collect(req, res) {
   if (!domain) return res.status(204).end();
   const site = getSiteByDomain.get(domain);
   if (!site) return res.status(202).end(); // unknown site → silently ignore
-  const ua = parseUA(req.headers['user-agent']);
+  const platform = appPlatform(b);
+  // apps: the HTTP client's user agent says nothing about the device, so OS/device come from the beacon.
+  // A bot-looking UA is still dropped, so the bot filter cannot be bypassed by just adding `pf`.
+  const rawUa = req.headers['user-agent'] || '';
+  let ua = parseUA(rawUa);
+  if (platform && rawUa && !BOT_RE.test(rawUa)) {
+    const dv = String(b.dv || '').toLowerCase();
+    ua = { browser: 'App', os: APP_PLATFORMS[platform], device: dv === 'tablet' ? 'Tablet' : dv === 'desktop' ? 'Desktop' : (platform === 'android' || platform === 'ios') ? 'Mobile' : 'Desktop' };
+  }
   if (!ua) return res.status(204).end(); // bot
 
   const ts = Date.now();
@@ -234,7 +255,12 @@ function collect(req, res) {
   try { pth = decodeURI(pth); } catch {}
   if (pth.length > 1) pth = pth.replace(/\/+$/, '') || '/';
   const ip = clientIp(req);
-  const vh = visitorHash(site.id, ip, req.headers['user-agent'] || '', day);
+  // apps may send `sid`: a random id the SDK draws per app launch and never persists (no device id).
+  // Mobile carriers put many phones behind one IP, so IP+UA alone would merge app users.
+  const sid = platform ? String(b.sid || '').slice(0, 64) : '';
+  const vh = sid && /^[A-Za-z0-9_-]{16,64}$/.test(sid)
+    ? visitorHash(site.id, 'app:' + sid, platform, day)
+    : visitorHash(site.id, ip, req.headers['user-agent'] || '', day);
 
   // internal visitor (CMS preview etc.): mark for the day and drop everything from them.
   const intern = INTERNAL_PATHS[domain] || [];
@@ -263,10 +289,14 @@ function collect(req, res) {
   const lang = String(b.l || b.lang || '').slice(0, 12).split(',')[0] || null;
   const name = String(b.n || b.name || '').slice(0, 80).trim() || null; // custom event / goal
   const props = name ? sanitizeProps(b.pr) : null; // properties only attach to named events
+  let country = countryFromTz(tz);
+  if (!country && platform) { const cc = String(b.cc || '').toUpperCase(); if (/^[A-Z]{2}$/.test(cc)) country = cc; }
+  const appVersion = platform ? (String(b.av || '').slice(0, 32).trim() || null) : null;
   insEvent.run({
     site_id: site.id, ts, day, path: pth, source, referrer: referrer || null,
-    country: countryFromTz(tz), tz, browser: ua.browser, os: ua.os, device: ua.device,
+    country, tz, browser: ua.browser, os: ua.os, device: ua.device,
     lang, name, utm_medium: utmMedium, utm_campaign: utmCampaign, dur: null, props, vh,
+    platform, app_version: appVersion,
   });
   res.status(204).end();
 }
@@ -373,7 +403,7 @@ function rangeFor(query) {
 
 // Whitelisted segmentation filters — click any breakdown row in the dashboard to drill in.
 // Every value is bound as a parameter; only these exact column names are ever interpolated.
-const FILTER_COLS = { country: 'country', source: 'source', page: 'path', browser: 'browser', os: 'os', device: 'device', lang: 'lang', medium: 'utm_medium', campaign: 'utm_campaign' };
+const FILTER_COLS = { country: 'country', source: 'source', page: 'path', browser: 'browser', os: 'os', device: 'device', lang: 'lang', medium: 'utm_medium', campaign: 'utm_campaign', platform: PLATFORM_SQL, version: 'app_version' };
 function buildFilters(query) {
   const clauses = [], params = [];
   for (const key of Object.keys(FILTER_COLS)) {
@@ -384,6 +414,16 @@ function buildFilters(query) {
   return { clauses, params, goal };
 }
 
+// Validated values only (whitelist / strict pattern), so they can be inlined into event queries.
+function eventPlatformFilter(query) {
+  let f = '';
+  const pf = String(query.platform || '').toLowerCase();
+  if (pf === 'web' || Object.prototype.hasOwnProperty.call(APP_PLATFORMS, pf)) f += ` AND ${PLATFORM_SQL} = '${pf}'`;
+  const v = String(query.version || '');
+  if (/^[A-Za-z0-9._+-]{1,32}$/.test(v)) f += ` AND app_version = '${v}'`;
+  return f;
+}
+
 function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
@@ -391,6 +431,7 @@ function statsHandler(req, res) {
   const sid = site.id;
   const { start, end, days, period, hourly } = rangeFor(req.query);
   const { clauses, params, goal } = buildFilters(req.query);
+  const evf = eventPlatformFilter(req.query); // platform/version also narrow event panels (revenue, search, 404)
 
   // pageview WHERE = time window + segmentation filters. A goal filter narrows the visitor
   // set to those who fired that event in-range (so every breakdown reflects converters only).
@@ -457,14 +498,14 @@ function statsHandler(req, res) {
 
   // goals: conversion = unique converters / unique visitors in the (filtered) range.
   const goalRows = db.prepare(
-    `SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 12`,
+    `SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 12`,
   ).all(sid, start, end);
   const goals = goalRows.map((g) => ({ ...g, cr: totals.visitors ? +((g.visitors / totals.visitors) * 100).toFixed(1) : 0 }));
 
   // properties: only meaningful when drilled into a single goal — top values per property key.
   let properties = null;
   if (goal) {
-    const rows = db.prepare(`SELECT props FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = ? AND props IS NOT NULL`).all(sid, start, end, goal);
+    const rows = db.prepare(`SELECT props FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name = ? AND props IS NOT NULL`).all(sid, start, end, goal);
     const byKey = {};
     for (const r of rows) {
       let obj; try { obj = JSON.parse(r.props); } catch { continue; }
@@ -490,7 +531,7 @@ function statsHandler(req, res) {
 
   // ── commerce (event "Purchase" with props.value) ──
   const purchases = db.prepare(
-    `SELECT vh, day, CAST(json_extract(props, '$.value') AS REAL) AS value FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Purchase'`,
+    `SELECT vh, day, ${PLATFORM_SQL} AS platform, CAST(json_extract(props, '$.value') AS REAL) AS value FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name = 'Purchase'`,
   ).all(sid, start, end);
   let commerce = null;
   if (purchases.length) {
@@ -506,17 +547,19 @@ function statsHandler(req, res) {
     ).all(sid, ...days, ...PAYMENT_HOSTS, sid, start, end);
     const srcOf = new Map(srcRows.map((r) => [r.vh + '|' + r.day, r.source]));
     void keys;
-    const bySrc = new Map();
+    const bySrc = new Map(), byPf = new Map();
     let revenue = 0;
     for (const pch of purchases) {
       const v = Number.isFinite(pch.value) ? pch.value : 0;
       revenue += v;
+      const pf = byPf.get(pch.platform) || { name: pch.platform, orders: 0, revenue: 0 };
+      pf.orders++; pf.revenue += v; byPf.set(pch.platform, pf);
       const src = srcOf.get(pch.vh + '|' + pch.day) || 'Direct';
       const e = bySrc.get(src) || { name: src, orders: 0, revenue: 0 };
       e.orders++; e.revenue += v; bySrc.set(src, e);
     }
     const prevRev = db.prepare(
-      `SELECT COUNT(*) n, SUM(CAST(json_extract(props, '$.value') AS REAL)) r FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Purchase'`,
+      `SELECT COUNT(*) n, SUM(CAST(json_extract(props, '$.value') AS REAL)) r FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name = 'Purchase'`,
     ).get(sid, start - len, start);
     const orders = purchases.length;
     commerce = {
@@ -524,13 +567,14 @@ function statsHandler(req, res) {
       cr: totals.visitors ? +((new Set(purchases.map((x) => x.vh + x.day)).size / totals.visitors) * 100).toFixed(2) : 0,
       // no trend against a near-empty baseline (e.g. the week tracking started) — a % of almost nothing is noise
       trend: prevRev.n >= 5 ? { orders: pct(orders, prevRev.n), revenue: pct(revenue, prevRev.r || 0) } : { orders: null, revenue: null },
+      byPlatform: [...byPf.values()].map((x) => ({ ...x, revenue: +x.revenue.toFixed(2), visitors: x.orders })).sort((a, b) => b.revenue - a.revenue),
       bySource: [...bySrc.values()].map((x) => ({ ...x, revenue: +x.revenue.toFixed(2), visitors: x.orders })).sort((a, b) => b.revenue - a.revenue).slice(0, 10),
     };
   }
 
   // ── site search (event "Search" with props.q + props.results) ──
   const searchRows = db.prepare(
-    `SELECT LOWER(TRIM(json_extract(props, '$.q'))) q, CAST(json_extract(props, '$.results') AS INTEGER) n, vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = 'Search' AND props IS NOT NULL`,
+    `SELECT LOWER(TRIM(json_extract(props, '$.q'))) q, CAST(json_extract(props, '$.results') AS INTEGER) n, vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name = 'Search' AND props IS NOT NULL`,
   ).all(sid, start, end);
   let search = null;
   if (searchRows.length) {
@@ -551,7 +595,7 @@ function statsHandler(req, res) {
 
   // ── broken pages (event "404" with props.url / props.from) ──
   const notFound = db.prepare(
-    `SELECT json_extract(props, '$.url') AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors, MAX(json_extract(props, '$.from')) AS fromPage FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = '404' GROUP BY name ORDER BY pageviews DESC LIMIT 10`,
+    `SELECT json_extract(props, '$.url') AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors, MAX(json_extract(props, '$.from')) AS fromPage FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name = '404' GROUP BY name ORDER BY pageviews DESC LIMIT 10`,
   ).all(sid, start, end);
 
   // ── scroll depth per page (pages with enough measured views) ──
@@ -585,6 +629,8 @@ function statsHandler(req, res) {
     browsers: topBy('browser', 6),
     os: topBy('os', 6),
     devices: topBy('device', 4),
+    platforms: topBy(PLATFORM_SQL, 6),
+    appVersions: topBy('app_version', 6),
     languages: topBy('lang', 6),
     goals,
     properties,
@@ -605,7 +651,7 @@ function realtimeHandler(req, res) {
   const map = new Map(rows.map((r) => [r.b, r]));
   const startB = Math.floor(since / 60000);
   const minutes = Array.from({ length: 30 }, (_, i) => { const r = map.get(startB + i + 1); return { visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 }; });
-  const recent = db.prepare('SELECT ts, path, country, tz, browser, os, device, source, lang, name FROM events WHERE site_id = ? AND ts >= ? ORDER BY id DESC LIMIT 60').all(sid, since);
+  const recent = db.prepare('SELECT ts, path, country, tz, browser, os, device, source, lang, name, platform FROM events WHERE site_id = ? AND ts >= ? ORDER BY id DESC LIMIT 60').all(sid, since);
   res.json({ online, minutes, recent, now });
 }
 app.get('/api/realtime', authOrShare, realtimeHandler);
