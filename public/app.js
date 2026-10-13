@@ -94,14 +94,53 @@
   };
   $('newDomain').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('createSiteBtn').click(); });
 
-  // ── snippet ──
+  // ── snippet: website, Flutter app, any other app (same site, platform tells them apart) ──
+  var SNIP_REPO = 'https://github.com/Open-Cosmic-Software/nyx-analytics';
+  state.snipTab = 'web';
   function snippetFor(domain) {
     return '<script defer data-domain="' + domain + '" src="' + ORIGIN + '/nyx.js"><\/script>';
   }
+  function snipParts(domain, tab) {
+    if (tab === 'flutter') return {
+      s1: '1 · Add the package to <code>pubspec.yaml</code>, then run <code>flutter pub get</code>:',
+      c1: 'dependencies:\n  nyx_analytics:\n    git:\n      url: ' + SNIP_REPO + '\n      path: sdk/flutter',
+      s2: '2 · Start it in <code>main()</code> — screens are tracked automatically:',
+      c2: "import 'package:nyx_analytics/nyx_analytics.dart';\n\nvoid main() {\n  NyxAnalytics.init(\n    endpoint: '" + ORIGIN + "',\n    domain: '" + domain + "',\n    appVersion: '1.0.0',\n    enabled: true,\n  );\n  runApp(MaterialApp(\n    navigatorObservers: [NyxRouteObserver()],\n    home: const MyHome(),\n  ));\n}",
+      hint: 'Goals &amp; revenue anywhere in your code:<br><code>NyxAnalytics.instance.event(\'Signup\')</code> · <code>.search(\'term\', 6)</code> · <code>.purchase(value: 49.90)</code><br><span style="opacity:.7">No cookies, no device id. Want it only after consent? Leave out <code>enabled: true</code> and call <code>setEnabled(true)</code> later.</span>'
+    };
+    if (tab === 'other') return {
+      s1: 'Swift, Kotlin, React Native, Unity … — send one JSON <code>POST</code> per screen or event:',
+      c1: 'POST ' + ORIGIN + '/api/collect\nContent-Type: application/json\nUser-Agent: MyApp/1.0 (android)\n\n{\n  "d": "' + domain + '",\n  "p": "/product/42",\n  "pf": "android",\n  "sid": "<random id, new per app launch>",\n  "av": "1.0.0"\n}',
+      s2: 'Event with properties (e.g. a purchase) — add a name and props:',
+      c2: '{\n  "d": "' + domain + '", "p": "/checkout", "pf": "ios", "sid": "…",\n  "n": "Purchase",\n  "pr": { "value": "49.90", "currency": "EUR" }\n}',
+      hint: '<code>pf</code>: android · ios · macos · windows · linux. <code>sid</code>: 16–64 random chars, kept in memory only — never a device id. All fields: <a href="' + SNIP_REPO + '#mobile--desktop-apps" target="_blank" rel="noopener">README</a>.'
+    };
+    return {
+      s1: 'Paste this once into the <code>&lt;head&gt;</code> of your site:',
+      c1: snippetFor(domain), s2: '', c2: '',
+      hint: 'Track goals &amp; properties from your code:<br><code>nyx(\'Signup\')</code> · <code>nyx(\'Signup\', { plan: \'pro\' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code>data-honor-dnt</code> · <code>data-track-outbound</code></span>'
+    };
+  }
+  function renderSnippet() {
+    var d = $('snipDomain').textContent, p = snipParts(d, state.snipTab);
+    $('snipStep1').innerHTML = p.s1;
+    $('snippetCode').textContent = p.c1;
+    $('snipStep2').innerHTML = p.s2;
+    $('snippetCode2').textContent = p.c2;
+    $('snippetCode2').classList.toggle('hide', !p.c2);
+    $('copySnippet2').classList.toggle('hide', !p.c2);
+    $('copySnippet').textContent = p.c2 ? 'Copy step 1' : 'Copy';
+    $('snipHint').innerHTML = p.hint;
+  }
   function showSnippet(domain) {
     $('snipDomain').textContent = domain;
-    $('snippetCode').textContent = snippetFor(domain);
+    renderSnippet();
     $('snippetModal').classList.remove('hide');
+  }
+  function copyFrom(btnId, codeId, label) {
+    navigator.clipboard.writeText($(codeId).textContent).then(function () {
+      $(btnId).textContent = 'Copied ✓'; setTimeout(function () { renderSnippet(); if (label) $(btnId).textContent = label; }, 1500);
+    });
   }
   // ── CSV export of the current view ──
   $('exportBtn').onclick = function () {
@@ -125,11 +164,8 @@
 
   $('snippetBtn').onclick = function () { if (state.site) showSnippet(state.site); };
   $('closeSnippet').onclick = function () { $('snippetModal').classList.add('hide'); };
-  $('copySnippet').onclick = function () {
-    navigator.clipboard.writeText(snippetFor($('snipDomain').textContent)).then(function () {
-      $('copySnippet').textContent = 'Copied ✓'; setTimeout(function () { $('copySnippet').textContent = 'Copy snippet'; }, 1500);
-    });
-  };
+  $('copySnippet').onclick = function () { copyFrom('copySnippet', 'snippetCode'); };
+  $('copySnippet2').onclick = function () { copyFrom('copySnippet2', 'snippetCode2', 'Copy step 2'); };
 
   // ── live visitors (last 30 min) ──
   var liveTimer = null;
@@ -208,6 +244,7 @@
   wireTabs('srcTabs', 'srcTab', renderSourcesPanel);
   wireTabs('searchTabs', 'searchTab', function () { renderSearch(); });
   wireTabs('pfTabs', 'pfTab', function () { renderPlatformsPanel(); });
+  wireTabs('snipTabs', 'snipTab', renderSnippet);
 
   // ── rendering ──
   function fmt(n) { n = n || 0; if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'; return String(n); }

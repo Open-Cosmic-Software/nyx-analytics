@@ -214,3 +214,15 @@ p.hint { margin: -4px 0 8px; }
 .muted { color: var(--text-dim); }
 .yoy { display: block; margin-top: 4px; font-size: .72rem; color: var(--text-dim); }
 .yoy.up { color: var(--green); } .yoy.down { color: var(--red); }
+
+/* embed dialog with website / app tabs (13.10.2026) */
+.modal.modal-wide { max-width: 620px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.snip-tabs { display: flex; justify-content: center; gap: 6px; margin: 0 0 14px; }
+.snip-step { text-align: left; font-size: .8rem; margin: 6px 0 0 !important; }
+.snip-hint { text-align: left; font-size: .78rem; margin: -2px 0 12px !important; }
+.snip-hint code, .snip-step code { color: var(--cyan); }
+.snip-hint a { color: var(--cyan); }
+.modal-wide .snippet { white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; }
+.snip-tabs { display: inline-flex !important; background: var(--glass); border: 1px solid var(--glass-border); border-radius: 999px; padding: 3px; gap: 2px !important; }
+.snip-tabs button { background: transparent; border: none; color: var(--text-dim); padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: all .2s; }
+.snip-tabs button.active { background: var(--grad); color: #fff; }

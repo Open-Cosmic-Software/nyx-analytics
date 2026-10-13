@@ -6,7 +6,7 @@
 <title>Nyx Analytics 🦞</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="/assets/nyx-logo-256.png">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=1.4.0">
 </head>
 <body>
 <!-- cosmic background -->
@@ -171,15 +171,24 @@
   </div>
 </div>
 
-<!-- Snippet modal -->
+<!-- Snippet modal: website + apps (13.10.2026) -->
 <div id="snippetModal" class="modal-overlay hide">
-  <div class="modal">
+  <div class="modal modal-wide">
     <span class="logo em">&lt;/&gt;</span>
-    <h2 class="grad-text">Embed code</h2>
-    <p>Paste this once into the <code>&lt;head&gt;</code> of <strong id="snipDomain"></strong>.</p>
+    <h2 class="grad-text">Add tracking</h2>
+    <p style="margin-bottom:12px">for <strong id="snipDomain"></strong>. Same dashboard for website and apps.</p>
+    <div class="tabs snip-tabs" id="snipTabs">
+      <button data-t="web" class="active">🌐 Website</button>
+      <button data-t="flutter">💙 Flutter app</button>
+      <button data-t="other">📱 Other apps</button>
+    </div>
+    <p class="muted snip-step" id="snipStep1"></p>
     <div class="snippet" id="snippetCode"></div>
-    <p class="muted" style="text-align:left;font-size:.78rem;margin:-2px 0 12px">Track goals &amp; properties from your code:<br><code style="color:var(--cyan)">nyx('Signup')</code> · <code style="color:var(--cyan)">nyx('Signup', { plan: 'pro' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code style="color:var(--cyan)">data-honor-dnt</code> · <code style="color:var(--cyan)">data-track-outbound</code></span></p>
-    <button class="btn" id="copySnippet">Copy snippet</button>
+    <p class="muted snip-step" id="snipStep2"></p>
+    <div class="snippet hide" id="snippetCode2"></div>
+    <p class="muted snip-hint" id="snipHint"></p>
+    <button class="btn" id="copySnippet">Copy</button>
+    <button class="btn ghost hide" id="copySnippet2" style="margin-top:10px">Copy step 2</button>
     <button class="btn ghost" id="closeSnippet" style="margin-top:10px">Close</button>
   </div>
 </div>
@@ -228,6 +237,6 @@
 </div>
 
 <div class="tip" id="tip"></div>
-<script src="/app.js?v=1.3.0"></script>
+<script src="/app.js?v=1.4.0"></script>
 </body>
 </html>
