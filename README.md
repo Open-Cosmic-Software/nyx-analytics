@@ -1,24 +1,26 @@
 <div align="center">
 
-<img src="public/assets/nyx-logo-256.png" width="120" alt="Nyx Analytics" />
+<img src="public/assets/tacilytics-mark.svg" width="96" alt="Tacilytics" />
 
-# Nyx Analytics
+# Tacilytics
 
-**Privacy-first, cookieless web analytics you can self-host in minutes.**
-A lightweight, cosmic-styled alternative to Google Analytics — one tiny script, one Node process, one SQLite file. No cookies, no consent banner, no creepy tracking.
+**Privacy-first, cookieless analytics for websites and apps — self-hosted in minutes.**
+*Tacit* (adj.): understood without being said. Tacilytics counts what matters and keeps quiet about who did it — one tiny script, one Node process, one SQLite file. No cookies, no consent banner, no creepy tracking.
+
+> Formerly **Nyx Analytics**. Existing installs keep working: `/nyx.js`, `window.nyx()` and the old Flutter class names are still supported as aliases.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-a855f7.svg)](LICENSE)
 ![Cookieless](https://img.shields.io/badge/cookies-zero-e879a8)
 ![No tracking](https://img.shields.io/badge/IPs%20stored-never-67e8f9)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-4ade80)
 
-<img src="docs/dashboard.png" width="820" alt="Nyx Analytics dashboard" />
+<img src="docs/dashboard.png" width="820" alt="Tacilytics dashboard" />
 
 </div>
 
 ---
 
-## Why Nyx
+## Why Tacilytics
 
 - 🍪 **Cookieless & banner-free.** No cookies, no `localStorage`, no fingerprinting — nothing to consent to.
 - 🛡️ **IPs are never stored.** Unique visitors are counted with a *daily, salted, one-way hash* that’s irreversible and rotated every day.
@@ -30,14 +32,14 @@ A lightweight, cosmic-styled alternative to Google Analytics — one tiny script
 - ⚡ **~2 KB tracker**, SPA-aware (tracks `pushState` / `popstate` route changes), optional **DNT / Global Privacy Control** honoring.
 - 🗓️ **Data minimisation built in** — optional auto-purge of raw events after a retention window you choose.
 - 🎯 **Custom events & goals**, **live visitors**, **trends**, **custom date ranges**, **CSV export**.
-- 🛰️ **Agent-ready:** a clean `/api/v1` REST API (with segmentation params) + a `nyx` CLI (with `--json`).
+- 🛰️ **Agent-ready:** a clean `/api/v1` REST API (with segmentation params) + a `tacilytics` CLI (with `--json`).
 - 🗄️ **Zero infra:** Express + SQLite. No Redis, no ClickHouse, no cloud.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/Open-Cosmic-Software/nyx-analytics.git
-cd nyx-analytics
+git clone https://github.com/Open-Cosmic-Software/tacilytics.git
+cd tacilytics
 npm install
 cp .env.example .env     # set WEB_PASSWORD, SESSION_SECRET, INGEST_SALT, API_KEY
 npm start                # http://127.0.0.1:3920
@@ -55,7 +57,7 @@ analytics.example.com {
 Open the dashboard, log in, click **+ Add site**, and drop the snippet into your `<head>`:
 
 ```html
-<script defer data-domain="example.com" src="https://analytics.example.com/nyx.js"></script>
+<script defer data-domain="example.com" src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
 That’s it. Pageviews start flowing in — no cookie banner required.
@@ -65,9 +67,9 @@ That’s it. Pageviews start flowing in — no cookie banner required.
 Track conversions from anywhere in your code — optionally with **properties** to break them down:
 
 ```js
-nyx('Signup');
-nyx('Upgrade', { plan: 'pro' });
-nyx('Purchase', { plan: 'pro', amount: '49' });
+tacilytics('Signup');
+tacilytics('Upgrade', { plan: 'pro' });
+tacilytics('Purchase', { plan: 'pro', amount: '49' });
 ```
 
 Goals show up in the **Goals & conversions** panel with a **conversion rate** (% of visitors). Click a goal to drill into it — the whole dashboard re-segments to converters, and each property’s top values appear as their own breakdown. Pageviews stay separate, so your view counts stay clean.
@@ -77,8 +79,8 @@ Goals show up in the **Goals & conversions** panel with a **conversion rate** (%
 Click any row — a country, page, source, browser, OS, device, language or campaign — to **filter the entire dashboard** to that segment. Filters stack and show as removable chips. The same segmentation is available over the API and CLI:
 
 ```bash
-nyx stats example.com 30d --country=DE --source=twitter.com
-curl -H "Authorization: Bearer $NYX_API_KEY" \
+tacilytics stats example.com 30d --country=DE --source=twitter.com
+curl -H "Authorization: Bearer $TACILYTICS_API_KEY" \
   "https://analytics.example.com/api/v1/stats?site=example.com&period=30d&country=DE&medium=email"
 ```
 
@@ -97,7 +99,7 @@ Opt-in flags on the `<script>` tag:
 <script defer data-domain="example.com"
         data-honor-dnt          <!-- skip tracking if DNT / Global Privacy Control is on -->
         data-track-outbound     <!-- auto-record clicks to other domains as events -->
-        src="https://analytics.example.com/nyx.js"></script>
+        src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
 ## Mobile & desktop apps
@@ -110,11 +112,11 @@ versions) and **Revenue by platform**.
 **Flutter** — a ready-made package lives in [`sdk/flutter`](sdk/flutter):
 
 ```dart
-NyxAnalytics.init(endpoint: 'https://analytics.example.com', domain: 'example.com', appVersion: '1.4.0');
-NyxAnalytics.instance.setEnabled(userConsented);       // off until you say so — wire it to your consent
-MaterialApp(navigatorObservers: [NyxRouteObserver()]); // automatic screen views
-NyxAnalytics.instance.search('vinegar', 6);
-NyxAnalytics.instance.purchase(value: 49.90, currency: 'EUR', items: 2);
+Tacilytics.init(endpoint: 'https://analytics.example.com', domain: 'example.com', appVersion: '1.4.0');
+Tacilytics.instance.setEnabled(userConsented);       // off until you say so — wire it to your consent
+MaterialApp(navigatorObservers: [TacilyticsRouteObserver()]); // automatic screen views
+Tacilytics.instance.search('vinegar', 6);
+Tacilytics.instance.purchase(value: 49.90, currency: 'EUR', items: 2);
 ```
 
 **Any other stack** (Swift, Kotlin, React Native, …) — it is one JSON `POST /api/collect`:
@@ -128,7 +130,7 @@ NyxAnalytics.instance.purchase(value: 49.90, currency: 'EUR', items: 2);
 | `av` | app version (optional) |
 | `dv` | `mobile` · `tablet` · `desktop` (optional) |
 | `l` / `cc` | language tag / 2-letter region of the device locale (optional) |
-| `n` / `pr` | event name + flat properties, same as the web `nyx()` call (optional) |
+| `n` / `pr` | event name + flat properties, same as the web `tacilytics()` call (optional) |
 | `s` / `um` / `uc` | utm source / medium / campaign, e.g. from a deep link (optional) |
 
 Send any non-empty, non-bot `User-Agent` (e.g. `MyApp/1.4 (android)`).
@@ -151,7 +153,7 @@ auto-refreshing every few seconds.
 Everything the dashboard shows is available over a stable REST API, authenticated with a Bearer key:
 
 ```bash
-curl -H "Authorization: Bearer $NYX_API_KEY" \
+curl -H "Authorization: Bearer $TACILYTICS_API_KEY" \
   "https://analytics.example.com/api/v1/stats?site=example.com&period=30d"
 ```
 
@@ -168,26 +170,26 @@ Add any of `country, source, page, browser, os, device, lang, medium, campaign, 
 ## CLI
 
 ```bash
-export NYX_URL=https://analytics.example.com
-export NYX_API_KEY=nyx_xxx
+export TACILYTICS_URL=https://analytics.example.com
+export TACILYTICS_API_KEY=xxx
 
-nyx sites
-nyx stats example.com 30d
-nyx live example.com --watch
-nyx add example.com
+tacilytics sites
+tacilytics stats example.com 30d
+tacilytics live example.com --watch
+tacilytics add example.com
 ```
 
 Add `--json` to any command for machine-readable output — perfect for agents and scripts.
 
 ## How it works
 
-`nyx.js` sends a tiny beacon (`navigator.sendBeacon`, `text/plain` so the cross-origin
+`tacilytics.js` sends a tiny beacon (`navigator.sendBeacon`, `text/plain` so the cross-origin
 request stays preflight-free) with the path, referrer, timezone and language — no
 personal data, no cookies. The server parses the User-Agent (browser/OS/device),
 drops bots, maps timezone → country, derives the **daily visitor hash**, and stores one
 row per pageview. The dashboard aggregates it with plain SQL.
 
-**The cookieless trade-off, honestly:** because there’s no persistent identifier, Nyx
+**The cookieless trade-off, honestly:** because there’s no persistent identifier, Tacilytics
 counts unique visitors *per day* and can’t follow the same person across days or
 devices. You get the 95 % that matters (how many, which pages, from where) with 0 %
 cookie banner — the same approach as Plausible/Fathom.
@@ -197,7 +199,7 @@ cookie banner — the same approach as Plausible/Fathom.
 | Env var | Default | Purpose |
 |---|---|---|
 | `PORT` | `3920` | Port (bound to 127.0.0.1) |
-| `WEB_PASSWORD` | `nyx` | Dashboard passphrase |
+| `WEB_PASSWORD` | `tacilytics` | Dashboard passphrase |
 | `SESSION_SECRET` | random | Session-token secret |
 | `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
@@ -218,9 +220,9 @@ cookie banner — the same approach as Plausible/Fathom.
 - All visitor-supplied values are HTML-escaped before they reach the DOM.
 - Run behind TLS; keep `.env` at `chmod 600`.
 
-## Nyx Analytics vs. Google Analytics
+## Tacilytics vs. Google Analytics
 
-| | Nyx Analytics | Google Analytics |
+| | Tacilytics | Google Analytics |
 |---|---|---|
 | Cookies / consent banner | ❌ none | ✅ required |
 | Stores IPs / personal data | ❌ never | ✅ yes |

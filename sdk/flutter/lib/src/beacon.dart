@@ -10,8 +10,8 @@ import 'dart:math';
 ///   l   language (de-AT)         cc  2-letter region of the device locale
 ///   sid random per-launch id (never persisted, never a device id)
 ///   s / um / uc  utm source / medium / campaign (e.g. from a deep link)
-class NyxBeacon {
-  NyxBeacon._();
+class TacilyticsBeacon {
+  TacilyticsBeacon._();
 
   static const _sidChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 

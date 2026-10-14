@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-/* Nyx Analytics CLI 🦞 — query your analytics from the terminal or an agent.
+/* Tacilytics CLI — query your analytics from the terminal or an agent.
  *
- *   export NYX_URL=https://analytics.example.com
- *   export NYX_API_KEY=nyx_xxx
- *   nyx sites
- *   nyx stats example.com 30d
- *   nyx live example.com --watch
- *   nyx add example.com
+ *   export TACILYTICS_URL=https://analytics.example.com
+ *   export TACILYTICS_API_KEY=xxx
+ *   tacilytics sites
+ *   tacilytics stats example.com 30d
+ *   tacilytics live example.com --watch
+ *   tacilytics add example.com
+ *
+ * NYX_URL / NYX_API_KEY are still read for setups from before the rename.
  *
  * Add --json to any command for raw machine-readable output (for agents).
  */
 'use strict';
 
-const URL_BASE = (process.env.NYX_URL || 'https://analytics.heynyx.dev').replace(/\/$/, '');
-const KEY = process.env.NYX_API_KEY || '';
+const URL_BASE = (process.env.TACILYTICS_URL || process.env.NYX_URL || 'http://localhost:3920').replace(/\/$/, '');
+const KEY = process.env.TACILYTICS_API_KEY || process.env.NYX_API_KEY || '';
 const args = process.argv.slice(2);
 const JSON_OUT = args.includes('--json');
 const WATCH = args.includes('--watch');
@@ -34,15 +36,15 @@ const dim = (s) => c('2', s), bold = (s) => c('1', s), green = (s) => c('38;5;12
 function die(msg) { console.error(red('✖ ' + msg)); process.exit(1); }
 
 async function api(path) {
-  if (!KEY) die('Set NYX_API_KEY (and optionally NYX_URL).');
+  if (!KEY) die('Set TACILYTICS_API_KEY (and optionally TACILYTICS_URL).');
   const res = await fetch(URL_BASE + path, { headers: { Authorization: 'Bearer ' + KEY } });
-  if (res.status === 401) die('Unauthorized — check NYX_API_KEY.');
+  if (res.status === 401) die('Unauthorized — check TACILYTICS_API_KEY.');
   const j = await res.json().catch(() => ({}));
   if (!res.ok) die(j.error || ('HTTP ' + res.status));
   return j;
 }
 async function post(path, body) {
-  if (!KEY) die('Set NYX_API_KEY (and optionally NYX_URL).');
+  if (!KEY) die('Set TACILYTICS_API_KEY (and optionally TACILYTICS_URL).');
   const res = await fetch(URL_BASE + path, { method: 'POST', headers: { Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) die(j.error || ('HTTP ' + res.status));
@@ -66,12 +68,12 @@ async function cmdSites() {
   const sites = await api('/api/v1/sites');
   if (JSON_OUT) return console.log(JSON.stringify(sites, null, 2));
   banner('Sites');
-  if (!sites.length) return console.log('  ' + dim('No sites yet. Add one:  nyx add example.com'));
+  if (!sites.length) return console.log('  ' + dim('No sites yet. Add one:  tacilytics add example.com'));
   sites.forEach((s) => console.log('  ' + cyan(pad(s.domain, 28)) + dim('  id ' + s.id)));
 }
 
 async function cmdStats() {
-  const domain = pos[1] || die('Usage: nyx stats <domain> [period] [--country=DE] [--from=YYYY-MM-DD --to=YYYY-MM-DD]');
+  const domain = pos[1] || die('Usage: tacilytics stats <domain> [period] [--country=DE] [--from=YYYY-MM-DD --to=YYYY-MM-DD]');
   const period = pos[2] || '7d';
   const range = flags.from && flags.to ? '' : `&period=${period}`;
   const s = await api(`/api/v1/stats?site=${encodeURIComponent(domain)}${range}${extraQuery()}`);
@@ -119,25 +121,25 @@ async function renderLive(domain) {
   });
 }
 async function cmdLive() {
-  const domain = pos[1] || die('Usage: nyx live <domain> [--watch]');
+  const domain = pos[1] || die('Usage: tacilytics live <domain> [--watch]');
   await renderLive(domain);
   if (WATCH && !JSON_OUT) setInterval(() => renderLive(domain).catch(() => {}), 5000);
 }
 
 async function cmdAdd() {
-  const domain = pos[1] || die('Usage: nyx add <domain>');
+  const domain = pos[1] || die('Usage: tacilytics add <domain>');
   const s = await post('/api/v1/sites', { domain });
   if (JSON_OUT) return console.log(JSON.stringify(s, null, 2));
   banner('Site added: ' + s.domain);
   console.log('\n  Embed this in your site <head>:\n');
-  console.log('  ' + cyan(`<script defer data-domain="${s.domain}" src="${URL_BASE}/nyx.js"></script>`));
+  console.log('  ' + cyan(`<script defer data-domain="${s.domain}" src="${URL_BASE}/tacilytics.js"></script>`));
 }
 
 function help() {
   console.log(`
-${pink('🦞 Nyx Analytics CLI')}
+${pink('Tacilytics CLI')}
 
-${bold('Usage')}  nyx <command> [--json] [--watch]
+${bold('Usage')}  tacilytics <command> [--json] [--watch]
 
   ${cyan('sites')}                     list tracked sites
   ${cyan('stats')} <domain> [period]   key metrics + breakdowns (today|7d|30d|90d|12mo)
@@ -149,8 +151,8 @@ ${bold('Segment & range')} (on stats)
   ${dim('--from=2026-01-01 --to=2026-01-31')}   custom date range
 
 ${bold('Config')} (env)
-  NYX_URL       ${dim(URL_BASE)}
-  NYX_API_KEY   ${KEY ? green('set') : red('not set')}
+  TACILYTICS_URL       ${dim(URL_BASE)}
+  TACILYTICS_API_KEY   ${KEY ? green('set') : red('not set')}
 
 ${dim('Add --json for machine-readable output (agents).')}
 `);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/* Nyx Analytics — privacy-first, cookieless web analytics 🦞🌌
+/* Tacilytics — privacy-first, cookieless analytics for web and apps.
+   (tacit: we count, we don't tell.)
    Express + better-sqlite3. No cookies, no cross-site tracking, IPs never stored
    (only a daily, salted, one-way visitor hash). Region is inferred from the
    browser timezone, never from IP geolocation. */
@@ -20,10 +21,10 @@ try {
 } catch {}
 
 const PORT = parseInt(process.env.PORT) || 3920;
-const WEB_PASSWORD = process.env.WEB_PASSWORD || 'nyx';
+const WEB_PASSWORD = process.env.WEB_PASSWORD || 'tacilytics';
 const API_KEY = process.env.API_KEY || ''; // for agents / CLI (Bearer token)
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(16).toString('hex');
-const INGEST_SALT = process.env.INGEST_SALT || 'nyx-analytics-salt';
+const INGEST_SALT = process.env.INGEST_SALT || 'tacilytics-salt'; // set your own in .env — changing it splits today's visitors
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'analytics.db');
 const RETENTION_DAYS = parseInt(process.env.DATA_RETENTION_DAYS, 10) || 0; // 0 = keep forever; >0 purges older raw events (data minimisation)
 
@@ -231,8 +232,9 @@ function rateLimited(key, max, windowMs) {
 setInterval(() => { const now = Date.now(); for (const [k, v] of rl) if (v.reset < now) rl.delete(k); }, 60000).unref();
 
 // ── tracking script (served with permissive CORS so any site can embed) ──────
-const TRACKER = fs.readFileSync(path.join(__dirname, 'public', 'nyx.js'), 'utf8');
-app.get('/nyx.js', (_req, res) => {
+const TRACKER = fs.readFileSync(path.join(__dirname, 'public', 'tacilytics.js'), 'utf8');
+// /nyx.js stays as an alias: sites embedded before the rename keep working unchanged.
+app.get(['/tacilytics.js', '/nyx.js'], (_req, res) => {
   res.set('Content-Type', 'application/javascript; charset=utf-8');
   res.set('Cache-Control', 'public, max-age=86400');
   res.set('Access-Control-Allow-Origin', '*');
@@ -316,7 +318,7 @@ app.options('/api/collect', (_req, res) => { res.set('Access-Control-Allow-Origi
 app.post('/api/collect', collect);
 app.get('/api/collect', collect);
 
-// ── auth (password → in-memory session token, mirrors NyxVault) ──────────────
+// ── auth (password → in-memory session token) ──────────────
 const sessions = new Map();
 function newToken() { return crypto.randomBytes(24).toString('hex'); }
 app.post('/auth/login', (req, res) => {
@@ -382,7 +384,7 @@ app.delete('/api/sites/:id', auth, (req, res) => {
 
 // ── /api/v1 — stable agent/CLI surface (Authorization: Bearer <API_KEY>) ──────
 app.get('/api/v1', (_req, res) => res.json({
-  name: 'Nyx Analytics API', version: '1',
+  name: 'Tacilytics API', version: '1',
   auth: 'Authorization: Bearer <API_KEY>',
   endpoints: {
     'GET /api/v1/sites': 'list tracked sites',
@@ -810,7 +812,7 @@ function purgeOld() {
   if (RETENTION_DAYS <= 0) return;
   const cutoff = Date.now() - RETENTION_DAYS * 864e5;
   const info = delOld.run(cutoff);
-  if (info.changes) console.log(`Nyx Analytics 🦞 retention: purged ${info.changes} events older than ${RETENTION_DAYS}d`);
+  if (info.changes) console.log(`Tacilytics retention: purged ${info.changes} events older than ${RETENTION_DAYS}d`);
 }
 if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).unref(); }
 
@@ -833,7 +835,7 @@ async function sendDigest() {
     lines.push(`**${site.domain}** ${arrow} ${cur.v} visitors · ${cur.pv} views${goals ? ` · ${goals} events` : ''}${top ? ` · top \`${top.path}\`` : ''}`);
   }
   if (!lines.length) return;
-  const body = { username: 'Nyx Analytics 🦞', content: `📊 **Daily digest — ${new Date(yStart).toISOString().slice(0, 10)}**\n` + lines.join('\n') };
+  const body = { username: 'Tacilytics', content: `📊 **Daily digest — ${new Date(yStart).toISOString().slice(0, 10)}**\n` + lines.join('\n') };
   try {
     const r = await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) console.error('digest webhook failed:', r.status);
@@ -874,10 +876,10 @@ async function watchdogTick() {
     if (now - (watchAlerted.get(key) || 0) < 6 * 3600e3) continue; // cooldown
     watchAlerted.set(key, now);
     try {
-      await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Nyx Analytics 🦞', content: `${emoji} **${site.domain}** ${text}` }) });
+      await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Tacilytics', content: `${emoji} **${site.domain}** ${text}` }) });
     } catch (e) { console.error('watchdog webhook error:', e.message); }
   }
 }
 if (DIGEST_WEBHOOK_URL) setInterval(watchdogTick, 3600e3).unref();
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Nyx Analytics 🦞 on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
+app.listen(PORT, '127.0.0.1', () => console.log(`Tacilytics on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));

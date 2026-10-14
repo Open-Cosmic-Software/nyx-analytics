@@ -1,5 +1,6 @@
-/* Nyx Analytics tracker 🦞 — cookieless, ~2KB. Embed:
-   <script defer data-domain="example.com" src="https://analytics.heynyx.dev/nyx.js"></script>
+/* Tacilytics tracker — cookieless, ~2KB. (tacit: we count, we don't tell.) Embed:
+   <script defer data-domain="example.com" src="https://your-server/tacilytics.js"></script>
+   (/nyx.js is served as an alias for sites set up before the rename — same file.)
 
    Optional data-* flags on the <script> tag:
      data-honor-dnt        respect Do-Not-Track / Global Privacy Control (skip all tracking)
@@ -8,11 +9,12 @@
                            (value = CSS selector that only exists on error pages, e.g. "body.is-act-error")
      data-track-search     record "Search" events: value = query-string parameter, e.g. "search"
                            (results counted via data-search-results selector, default ".product-box")
-   Purchases: nyx('Purchase', { value: 49.90, currency: 'EUR', items: 3 }) on the thank-you page
-   Custom events:  nyx('Signup')  ·  nyx('Signup', { plan: 'pro' }) */
+   Purchases: tacilytics('Purchase', { value: 49.90, currency: 'EUR', items: 3 }) on the thank-you page
+   Custom events:  tacilytics('Signup')  ·  tacilytics('Signup', { plan: 'pro' })
+   window.nyx / window.nyxConfig still work as aliases. */
 (function () {
   try {
-    var s = document.currentScript || document.querySelector('script[data-domain][src*="nyx.js"]');
+    var s = document.currentScript || document.querySelector('script[data-domain][src*="tacilytics.js"], script[data-domain][src*="nyx.js"]');
     var domain = s && s.getAttribute('data-domain');
     if (!s || !domain) return;
 
@@ -94,13 +96,14 @@
       send();
     }
     var push = history.pushState;
-    history.pushState = function () { push.apply(this, arguments); onNav(); if (window.__nyxSearchCheck) window.__nyxSearchCheck(); };
+    history.pushState = function () { push.apply(this, arguments); onNav(); if (window.__tacilyticsSearchCheck) window.__tacilyticsSearchCheck(); };
     var replace = history.replaceState;
-    history.replaceState = function () { replace.apply(this, arguments); onNav(); if (window.__nyxSearchCheck) window.__nyxSearchCheck(); };
+    history.replaceState = function () { replace.apply(this, arguments); onNav(); if (window.__tacilyticsSearchCheck) window.__tacilyticsSearchCheck(); };
     window.addEventListener('popstate', onNav);
 
-    // ── custom events / goals:  nyx('Signup')  ·  nyx('Signup', { plan: 'pro' }) ──
-    window.nyx = function (name, props) { if (name && typeof name === 'string') send(name.slice(0, 80), props); };
+    // ── custom events / goals:  tacilytics('Signup')  ·  tacilytics('Signup', { plan: 'pro' }) ──
+    window.tacilytics = function (name, props) { if (name && typeof name === 'string') send(name.slice(0, 80), props); };
+    window.nyx = window.tacilytics; // alias for installs from before the rename
 
     // ── optional automatic outbound-link tracking ──
     if (s.hasAttribute('data-track-outbound')) {
@@ -110,29 +113,29 @@
         try {
           var u = new URL(a.href, location.href);
           if ((u.protocol === 'http:' || u.protocol === 'https:') && u.hostname !== location.hostname) {
-            window.nyx('Outbound Link', { url: u.hostname + u.pathname });
+            window.tacilytics('Outbound Link', { url: u.hostname + u.pathname });
           }
         } catch (e) {}
       }, true);
     }
 
     // ── 404 pages: one event with the broken URL and where the visitor came from ──
-    var cfg = window.nyxConfig || {};
+    var cfg = window.tacilyticsConfig || window.nyxConfig || {};
     var sel404 = s.getAttribute('data-track-404') || cfg.track404 || '';
     function check404() {
       try {
         if (sel404 && document.querySelector(sel404)) {
           var from = '';
           try { var ru = new URL(document.referrer); from = ru.hostname === location.hostname ? ru.pathname : ru.hostname; } catch (e) {}
-          window.nyx('404', { url: location.pathname, from: from });
+          window.tacilytics('404', { url: location.pathname, from: from });
         }
       } catch (e) {}
     }
 
     // ── site search: query + number of results ──
     //   classic results page:  data-track-search="search"      (?search=…)
-    //   overlay search in the URL hash: nyxConfig.searchHash = { param: 'mbai', key: 'query' }  (#mbai=query%3D…)
-    //   nyxConfig.searchResults / searchEmpty: CSS selectors to count hits / detect "no results"
+    //   overlay search in the URL hash: tacilyticsConfig.searchHash = { param: 'mbai', key: 'query' }  (#mbai=query%3D…)
+    //   tacilyticsConfig.searchResults / searchEmpty: CSS selectors to count hits / detect "no results"
     var searchParam = s.getAttribute('data-track-search') || cfg.searchParam || '';
     var searchHash = cfg.searchHash || null;
     var resSel = s.getAttribute('data-search-results') || cfg.searchResults || '.product-box';
@@ -151,7 +154,7 @@
           if (emptySel && document.querySelector(emptySel)) n = 0;
           else n = document.querySelectorAll(resSel).length;
         } catch (e) {}
-        window.nyx('Search', { q: q, results: n });
+        window.tacilytics('Search', { q: q, results: n });
       }, 2500);
     }
     function searchFromHash() {
@@ -166,7 +169,7 @@
     }
     if (searchHash) {
       window.addEventListener('hashchange', function () { reportSearch(searchFromHash()); });
-      window.__nyxSearchCheck = function () { reportSearch(searchFromHash()); }; // overlay updates the hash via history API
+      window.__tacilyticsSearchCheck = window.__nyxSearchCheck = function () { reportSearch(searchFromHash()); }; // overlay updates the hash via history API
     }
     function afterLoad(fn) { if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(fn, 0); else document.addEventListener('DOMContentLoaded', fn); }
     afterLoad(function () { check404(); checkSearch(); });
