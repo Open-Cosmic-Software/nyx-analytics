@@ -384,3 +384,28 @@ header { background: rgba(7,17,20,.74); }
 
 #p-pages .bar .name .txt, #p-404 .bar .name .txt, .feed-row .path { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace; font-size: .78rem; font-weight: 400; color: #cfe3e0; }
 #p-pages .bar .name, #p-404 .bar .name { font-family: inherit; }
+
+/* ── header v4: floating card, exactly as wide as the content ── */
+header {
+  position: sticky; top: 12px; z-index: 40;
+  margin: 14px 0 22px; padding: 12px 14px 12px 16px;
+  border: 1px solid var(--line-strong); border-radius: 16px;
+  background: linear-gradient(180deg, rgba(20,40,44,.78), rgba(10,22,25,.78));
+  backdrop-filter: saturate(160%) blur(16px); -webkit-backdrop-filter: saturate(160%) blur(16px);
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 18px 40px -24px rgba(0,0,0,.8), 0 0 0 1px rgba(45,212,191,.04);
+}
+header::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, rgba(45,212,191,.45), rgba(255,122,92,.35), transparent); pointer-events: none; }
+.brand { gap: 12px; }
+.brand .logo { width: 36px; height: 36px; border-radius: 10px; }
+.brand h1 { font-size: 1.12rem; }
+.brand .subtitle { font-size: .76rem; color: var(--text-faint); margin-top: 1px; }
+.header-right { gap: 8px; }
+.header-right .realtime, .header-right select, .header-right .btn { height: 36px; border-radius: 10px; }
+.header-right select { background-color: rgba(255,255,255,.03); border: 1px solid var(--line-strong); padding: 0 34px 0 12px; }
+.header-right .btn.ghost { background: rgba(255,255,255,.03); border-color: var(--line-strong); }
+.header-right .btn.ghost:hover { background: rgba(45,212,191,.08); border-color: var(--accent-line); }
+.header-right .realtime { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; }
+.realtime .dot { animation: taci-pulse 2.4s ease-in-out infinite; }
+@keyframes taci-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(45,212,191,.18); } 50% { box-shadow: 0 0 0 6px rgba(45,212,191,.05); } }
+@media (prefers-reduced-motion: reduce) { .realtime .dot { animation: none; } }
+@media (max-width: 760px) { header { margin: 10px 0 18px; top: 8px; padding: 10px 12px; } .brand .subtitle { display: none; } }
