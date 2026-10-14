@@ -5,7 +5,7 @@
 # Tacilytics
 
 **Privacy-first, cookieless analytics for websites and apps — self-hosted in minutes.**
-*Tacit* (adj.): understood without being said. Tacilytics counts what matters and keeps quiet about who did it — one tiny script, one Node process, one SQLite file. No cookies, no consent banner, no creepy tracking.
+*Tacit* (adj.): understood without being said. Tacilytics counts what matters and keeps quiet about who did it — one tiny script, one Node process, one SQLite file. No cookies, no consent banner, no creepy tracking. (And in Italian, *taci* simply means "be quiet".)
 
 > Formerly **Nyx Analytics**. Existing installs keep working: `/nyx.js`, `window.nyx()` and the old Flutter class names are still supported as aliases.
 

@@ -1,7 +1,7 @@
 {
   "name": "tacilytics",
-  "version": "1.2.0",
-  "description": "Tacilytics — privacy-first, cookieless analytics for websites and apps. Self-hosted, no banner, Flutter SDK, agent API + CLI.",
+  "version": "2.0.0",
+  "description": "Tacilytics \u2014 privacy-first, cookieless analytics for websites and apps. Self-hosted, no banner, Flutter SDK, agent API + CLI.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
