@@ -409,3 +409,7 @@ header::after { content: ""; position: absolute; left: 18px; right: 18px; bottom
 @keyframes taci-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(45,212,191,.18); } 50% { box-shadow: 0 0 0 6px rgba(45,212,191,.05); } }
 @media (prefers-reduced-motion: reduce) { .realtime .dot { animation: none; } }
 @media (max-width: 760px) { header { margin: 10px 0 18px; top: 8px; padding: 10px 12px; } .brand .subtitle { display: none; } }
+
+/* native dropdown lists follow the dark theme (otherwise light text on a white popup) */
+select { color-scheme: dark; }
+select option { background: #0c1a1d; color: var(--text); }

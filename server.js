@@ -419,7 +419,10 @@ function rangeFor(query) {
   }
   const period = PERIODS[query.period] ? query.period : '7d';
   const days = PERIODS[period];
-  const start = period === 'today' ? new Date(new Date(now).toISOString().slice(0, 10)).getTime() : now - days * 864e5;
+  // Whole UTC days: "7d" = today + the 6 full days before it. Starting at now - 7×24h would
+  // cut the oldest day off at the current clock time and undercount it.
+  const today0 = Date.parse(new Date(now).toISOString().slice(0, 10) + 'T00:00:00Z');
+  const start = today0 - (days - 1) * 864e5;
   return { start, end: now, days, period, hourly: period === 'today' };
 }
 
