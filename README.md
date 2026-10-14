@@ -230,6 +230,13 @@ cookie banner — the same approach as Plausible/Fathom.
 | Weight | ~2 KB | ~45 KB+ |
 | Setup | 1 script + 1 process | tag manager, config… |
 
+## Credits
+
+- UI icons: [Lucide](https://lucide.dev) (ISC)
+- Brand marks: [Simple Icons](https://simpleicons.org) (CC0). Brand names and logos are trademarks of their owners; see `public/assets/DISCLAIMER-simple-icons.md`. Windows and Edge have no free official mark, so a neutral icon is shown.
+- Flags: [flag-icons](https://flagicons.lipis.dev) (MIT)
+- Font: [Inter](https://rsms.me/inter/) (SIL OFL 1.1), self-hosted
+
 ## License
 
 [MIT](LICENSE) — built by **Nyx & Fabian** 🦞

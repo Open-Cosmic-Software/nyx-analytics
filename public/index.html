@@ -6,9 +6,9 @@
 <title>Tacilytics</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="/assets/tacilytics-mark.svg" type="image/svg+xml">
-<meta name="theme-color" content="#0b0d12">
+<meta name="theme-color" content="#071114">
 <link rel="preload" href="/assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/style.css?v=2.1.0">
+<link rel="stylesheet" href="/style.css?v=2.2.0">
 </head>
 <body>
 
@@ -37,7 +37,7 @@
     <div class="header-right">
       <div class="realtime" id="realtimeBtn" title="View live visitors" style="cursor:pointer"><span class="dot"></span><span id="realtime">0</span> online now</div>
       <select id="siteSelect"></select>
-      <button class="btn ghost" id="addSiteBtn">+ Add site</button>
+      <button class="btn ghost" id="addSiteBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-plus"></use></svg>Add site</button>
       <button class="btn ghost danger" id="logoutBtn">Sign out</button>
     </div>
   </header>
@@ -52,12 +52,12 @@
     </div>
     <div class="toolbar-right">
       <div class="range" id="range">
-        <input type="date" id="fromDate" title="From"><span class="arrow">→</span><input type="date" id="toDate" title="To">
+        <input type="date" id="fromDate" title="From"><span class="arrow"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-arrow"></use></svg></span><input type="date" id="toDate" title="To">
         <button class="btn ghost" id="applyRange">Apply</button>
       </div>
-      <button class="btn ghost" id="exportBtn">⬇ CSV</button>
-      <button class="btn ghost" id="shareBtn" title="Create a public read-only link">🔗 Share</button>
-      <button class="btn ghost" id="snippetBtn">&lt;/&gt; Embed code</button>
+      <button class="btn ghost" id="exportBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-download"></use></svg>CSV</button>
+      <button class="btn ghost" id="shareBtn" title="Create a public read-only link"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-share"></use></svg>Share</button>
+      <button class="btn ghost" id="snippetBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-code"></use></svg>Embed code</button>
     </div>
   </div>
 
@@ -94,7 +94,7 @@
 
     <div class="panels">
       <div class="card panel">
-        <h3><span class="em">📄</span> Pages
+        <h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-pages"></use></svg> Pages
           <span class="tabs" id="pageTabs">
             <button data-t="pages" class="active">Top</button>
             <button data-t="entryPages">Entry</button>
@@ -104,7 +104,7 @@
         <div class="bars" id="p-pages"></div>
       </div>
       <div class="card panel">
-        <h3><span class="em">🔗</span> Sources
+        <h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-sources"></use></svg> Sources
           <span class="tabs" id="srcTabs">
             <button data-t="sources" class="active">Source</button>
             <button data-t="mediums">Medium</button>
@@ -113,37 +113,37 @@
         </h3>
         <div class="bars" id="p-sources"></div>
       </div>
-      <div class="card panel"><h3><span class="em">🌍</span> Locations</h3><div class="bars" id="p-countries"></div></div>
-      <div class="card panel"><h3><span class="em">🧭</span> Browsers</h3><div class="bars" id="p-browsers"></div></div>
-      <div class="card panel"><h3><span class="em">💻</span> OS</h3><div class="bars" id="p-os"></div></div>
-      <div class="card panel"><h3><span class="em">📱</span> Devices</h3><div class="bars" id="p-devices"></div></div>
-      <div class="card panel hide" id="w-platforms"><h3><span class="em">🛸</span> Platforms
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-globe"></use></svg> Locations</h3><div class="bars" id="p-countries"></div></div>
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-browser"></use></svg> Browsers</h3><div class="bars" id="p-browsers"></div></div>
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-os"></use></svg> OS</h3><div class="bars" id="p-os"></div></div>
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-device"></use></svg> Devices</h3><div class="bars" id="p-devices"></div></div>
+      <div class="card panel hide" id="w-platforms"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-platform"></use></svg> Platforms
           <span class="tabs" id="pfTabs"><button data-t="platforms" class="active">Platform</button><button data-t="appVersions">App version</button></span>
         </h3><div class="bars" id="p-platforms"></div></div>
-      <div class="card panel"><h3><span class="em">🎯</span> Goals &amp; conversions</h3><div class="bars" id="p-goals"></div></div>
-      <div class="card panel"><h3><span class="em">🗣️</span> Languages</h3><div class="bars" id="p-languages"></div></div>
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-goal"></use></svg> Goals &amp; conversions</h3><div class="bars" id="p-goals"></div></div>
+      <div class="card panel"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-lang"></use></svg> Languages</h3><div class="bars" id="p-languages"></div></div>
     </div>
 
     <!-- shop insights: revenue by source, site search, broken pages, scroll depth (13.10.2026) -->
     <div class="panels" id="insights" style="margin-top:16px">
-      <div class="card panel hide" id="w-revsrc"><h3><span class="em">💶</span> Revenue by source <span class="muted hint">first source of the buying visit</span></h3><div class="bars" id="p-revsrc"></div></div>
-      <div class="card panel hide" id="w-revpf"><h3><span class="em">🛸</span> Revenue by platform <span class="muted hint">web vs. apps</span></h3><div class="bars" id="p-revpf"></div></div>
-      <div class="card panel hide" id="w-search"><h3><span class="em">🔎</span> Site search
+      <div class="card panel hide" id="w-revsrc"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-revenue"></use></svg> Revenue by source <span class="muted hint">first source of the buying visit</span></h3><div class="bars" id="p-revsrc"></div></div>
+      <div class="card panel hide" id="w-revpf"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-platform"></use></svg> Revenue by platform <span class="muted hint">web vs. apps</span></h3><div class="bars" id="p-revpf"></div></div>
+      <div class="card panel hide" id="w-search"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-search"></use></svg> Site search
           <span class="tabs" id="searchTabs"><button data-t="top" class="active">Top</button><button data-t="zeroResults">No results</button></span>
         </h3><p class="muted hint" id="searchMeta"></p><div class="bars" id="p-search"></div></div>
-      <div class="card panel hide" id="w-404"><h3><span class="em">🧱</span> Broken pages (404)</h3><div class="bars" id="p-404"></div></div>
-      <div class="card panel hide" id="w-scroll"><h3><span class="em">📜</span> Scroll depth <span class="muted hint">avg · share reaching 75 %</span></h3><div class="bars" id="p-scroll"></div></div>
+      <div class="card panel hide" id="w-404"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-404"></use></svg> Broken pages (404)</h3><div class="bars" id="p-404"></div></div>
+      <div class="card panel hide" id="w-scroll"><h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-scroll"></use></svg> Scroll depth <span class="muted hint">avg · share reaching 75 %</span></h3><div class="bars" id="p-scroll"></div></div>
     </div>
 
     <!-- visitor journeys (sankey) -->
     <div class="card panel" style="margin-top:16px">
-      <h3><span class="em">🌊</span> Visitor journeys <span class="muted" id="journeyMeta" style="font-size:.75rem;font-weight:400"></span></h3>
+      <h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-journey"></use></svg> Visitor journeys <span class="muted" id="journeyMeta" style="font-size:.75rem;font-weight:400"></span></h3>
       <div id="journeyWrap" style="overflow-x:auto"><svg id="journey" width="100%" height="340"></svg></div>
     </div>
 
     <!-- funnels -->
     <div class="card panel" style="margin-top:16px">
-      <h3><span class="em">🌀</span> Funnels
+      <h3><svg class="ico h" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-funnel"></use></svg> Funnels
         <span class="tabs"><button id="addFunnelBtn">+ New funnel</button></span>
       </h3>
       <div id="funnels" class="funnels"></div>
@@ -158,12 +158,12 @@
 <!-- Add site modal -->
 <div id="addModal" class="modal-overlay hide">
   <div class="modal">
-    <span class="logo em">🛰️</span>
+    <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-site"></use></svg></span>
     <h2>Add a site</h2>
     <p>Enter the domain you want to track.</p>
     <div id="addErr" class="err"></div>
     <input id="newDomain" type="text" placeholder="example.com" autocomplete="off">
-    <button class="btn" id="createSiteBtn">Create →</button>
+    <button class="btn" id="createSiteBtn">Create</button>
     <button class="btn ghost" id="cancelAdd" style="margin-top:10px">Cancel</button>
   </div>
 </div>
@@ -171,13 +171,13 @@
 <!-- Snippet modal: website + apps (13.10.2026) -->
 <div id="snippetModal" class="modal-overlay hide">
   <div class="modal modal-wide">
-    <span class="logo em">&lt;/&gt;</span>
+    <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-code"></use></svg></span>
     <h2>Add tracking</h2>
     <p style="margin-bottom:12px">for <strong id="snipDomain"></strong>. Same dashboard for website and apps.</p>
     <div class="tabs snip-tabs" id="snipTabs">
-      <button data-t="web" class="active">🌐 Website</button>
-      <button data-t="flutter">💙 Flutter app</button>
-      <button data-t="other">📱 Other apps</button>
+      <button data-t="web" class="active"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-web"></use></svg>Website</button>
+      <button data-t="flutter"><svg class="ico brand" style="color:#02569B" aria-hidden="true"><use href="/assets/icons.svg?v=1#b-flutter"></use></svg>Flutter app</button>
+      <button data-t="other"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-mobile"></use></svg>Other apps</button>
     </div>
     <p class="muted snip-step" id="snipStep1"></p>
     <div class="snippet" id="snippetCode"></div>
@@ -193,7 +193,7 @@
 <!-- Share modal -->
 <div id="shareModal" class="modal-overlay hide">
   <div class="modal">
-    <span class="logo em">🔗</span>
+    <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-share"></use></svg></span>
     <h2>Share dashboard</h2>
     <p>Anyone with this link can view stats for <strong id="shareDomain"></strong> — read-only, no login.</p>
     <div class="snippet" id="shareUrl" style="word-break:break-all"></div>
@@ -206,14 +206,14 @@
 <!-- Funnel builder modal -->
 <div id="funnelModal" class="modal-overlay hide">
   <div class="modal">
-    <span class="logo em">🌀</span>
+    <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=1#i-funnel"></use></svg></span>
     <h2>New funnel</h2>
     <p>2–8 ordered steps. A visitor advances only after completing the previous step.</p>
     <div id="funnelErr" class="err"></div>
     <input id="funnelName" type="text" placeholder="Funnel name, e.g. Signup flow" autocomplete="off">
     <div id="funnelSteps"></div>
     <button class="btn ghost" id="addStepBtn" style="margin-top:6px">+ Add step</button>
-    <button class="btn" id="createFunnelBtn" style="margin-top:10px">Create →</button>
+    <button class="btn" id="createFunnelBtn" style="margin-top:10px">Create</button>
     <button class="btn ghost" id="cancelFunnel" style="margin-top:10px">Cancel</button>
   </div>
 </div>
@@ -234,6 +234,6 @@
 </div>
 
 <div class="tip" id="tip"></div>
-<script src="/app.js?v=2.1.0"></script>
+<script src="/app.js?v=2.2.0"></script>
 </body>
 </html>

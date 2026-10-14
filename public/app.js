@@ -48,10 +48,43 @@
   }
 
   // ── flags / names ──
-  function flag(cc) {
-    if (!cc || cc.length !== 2) return '🏳️';
-    return cc.toUpperCase().replace(/./g, function (c) { return String.fromCodePoint(127397 + c.charCodeAt(0)); });
+  // ── icons: UI = Lucide, brands = Simple Icons (sprite /assets/icons.svg), flags = flag-icons ──
+  var SPRITE = '/assets/icons.svg?v=1';
+  var BRAND_COLORS = {"apple": "#000000", "android": "#3DDC84", "linux": "#FCC624", "chrome": "#4285F4", "safari": "#006CFF", "firefox": "#FF7139", "samsung": "#1428A0", "opera": "#FF1B2D", "google": "#4285F4", "facebook": "#0866FF", "instagram": "#FF0069", "youtube": "#FF0000", "tiktok": "#000000", "x": "#000000", "duckduckgo": "#DE5833", "gmail": "#EA4335", "whatsapp": "#25D366", "pinterest": "#BD081C", "reddit": "#FF4500", "klarna": "#FFB3C7", "paypal": "#002991", "flutter": "#02569B", "swift": "#F05138", "kotlin": "#7F52FF", "react": "#61DAFB", "ecosia": "#008009", "brave": "#FB542B", "vivaldi": "#EF3939", "yandex": "#5282FF", "telegram": "#26A5E4", "ios": "#000000", "macos": "#000000", "ubuntu": "#E95420", "chromeos": "#4285F4", "twitch": "#9146FF", "github": "#181717", "discord": "#5865F2", "snapchat": "#FFFC00", "threads": "#000000", "bluesky": "#1185FE", "mastodon": "#6364FF", "signal": "#3B45FD"};
+  function isDark(hex) {
+    var h = hex.replace('#', ''); if (h.length !== 6) return false;
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return Math.max(r, g, b) < 90; // only near-black / deep navy marks; saturated reds stay
   }
+  function ico(id, cls) { return '<svg class="ico ' + (cls || '') + '" aria-hidden="true"><use href="' + SPRITE + '#' + id + '"></use></svg>'; }
+  function brand(name, fallbackUi) {
+    if (!name) return ico(fallbackUi || 'i-other', 'ui');
+    var c = BRAND_COLORS[name];
+    if (name === 'samsung') c = '#6f8dff'; // Samsung navy is unreadable on dark — same hue, lighter
+    if (c && isDark(c)) c = '#e7f3f1'; // black logos (Apple, X, GitHub …) would vanish on the dark UI
+    return '<svg class="ico brand" aria-hidden="true"' + (c ? ' style="color:' + c + '"' : '') + '><use href="' + SPRITE + '#b-' + name + '"></use></svg>';
+  }
+  function flagIcon(cc) {
+    if (!cc || !/^[A-Za-z]{2}$/.test(cc)) return ico('i-globe', 'ui');
+    return '<img class="flag" src="/assets/flags/' + cc.toLowerCase() + '.svg" alt="" loading="lazy" width="18" height="14">';
+  }
+  var BROWSER_ICON = { Chrome: 'chrome', Safari: 'safari', Firefox: 'firefox', Samsung: 'samsung', Opera: 'opera', Vivaldi: 'vivaldi', Brave: 'brave', Yandex: 'yandex' };
+  var OS_ICON = { Android: 'android', iOS: 'apple', macOS: 'apple', Linux: 'linux', ChromeOS: 'chrome' };
+  var PLATFORM_ICON = { android: 'android', ios: 'apple', macos: 'apple', linux: 'linux' };
+  function sourceBrand(n) {
+    var h = String(n || '').toLowerCase();
+    var map = [['google', 'google'], ['gmail', 'gmail'], ['.gm', 'gmail'], ['facebook', 'facebook'], ['fb', 'facebook'], ['instagram', 'instagram'], ['ig', 'instagram'],
+      ['youtube', 'youtube'], ['tiktok', 'tiktok'], ['t.co', 'x'], ['twitter', 'x'], ['x.com', 'x'], ['duckduckgo', 'duckduckgo'], ['ecosia', 'ecosia'], ['reddit', 'reddit'],
+      ['pinterest', 'pinterest'], ['whatsapp', 'whatsapp'], ['telegram', 'telegram'], ['github', 'github'], ['paypal', 'paypal'], ['klarna', 'klarna'], ['discord', 'discord'],
+      ['twitch', 'twitch'], ['snapchat', 'snapchat'], ['threads', 'threads'], ['bsky', 'bluesky'], ['mastodon', 'mastodon']];
+    for (var i = 0; i < map.length; i++) {
+      var k = map[i][0];
+      if (h === k || h.indexOf(k + '.') === 0 || h.indexOf('.' + k + '.') >= 0 || h.indexOf(k) >= 0 && k.length > 3) return map[i][1];
+    }
+    return null;
+  }
+
+  function flag(cc) { return flagIcon(cc); } // returns HTML now (img), never a text emoji
   var NAMES = { DE: 'Germany', AT: 'Austria', CH: 'Switzerland', GB: 'United Kingdom', US: 'United States', FR: 'France', NL: 'Netherlands', ES: 'Spain', IT: 'Italy', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland', CZ: 'Czechia', BE: 'Belgium', IE: 'Ireland', PT: 'Portugal', CA: 'Canada', AU: 'Australia', BR: 'Brazil', IN: 'India', JP: 'Japan', CN: 'China', RU: 'Russia', TR: 'Turkey', MX: 'Mexico', HU: 'Hungary', RO: 'Romania', GR: 'Greece', UA: 'Ukraine', HR: 'Croatia', NZ: 'New Zealand', SG: 'Singapore', KR: 'South Korea', IL: 'Israel', AE: 'UAE', ZA: 'South Africa' };
 
   // ── login ──
@@ -143,7 +176,7 @@
   }
   function copyFrom(btnId, codeId, label) {
     navigator.clipboard.writeText($(codeId).textContent).then(function () {
-      $(btnId).textContent = 'Copied ✓'; setTimeout(function () { renderSnippet(); if (label) $(btnId).textContent = label; }, 1500);
+      $(btnId).textContent = 'Copied'; setTimeout(function () { renderSnippet(); if (label) $(btnId).textContent = label; }, 1500);
     });
   }
   // ── CSV export of the current view ──
@@ -203,9 +236,9 @@
     var el = $('live-feed');
     if (!recent || !recent.length) { el.innerHTML = '<div class="empty">No visitors in the last 30 minutes</div>'; return; }
     el.innerHTML = recent.map(function (e) {
-      var loc = e.country ? flag(e.country) : '🌐';
-      var what = e.name ? '<span class="goal">🎯 ' + esc(e.name) + '</span>' : '<span class="path">' + esc(e.path) + '</span>';
-      var src = (e.source && e.source !== 'Direct') ? '↗ ' + e.source : '';
+      var loc = e.country ? flagIcon(e.country) : ico('i-globe', 'ui');
+      var what = e.name ? '<span class="goal">' + ico('i-goal', 'ui') + ' ' + esc(e.name) + '</span>' : '<span class="path">' + esc(e.path) + '</span>';
+      var src = (e.source && e.source !== 'Direct') ? 'via ' + e.source : '';
       var meta = [e.platform ? platformLabel(e.platform) : e.browser, e.device, src].filter(Boolean).map(esc).join(' · ');
       return '<div class="feed-row"><span class="fl" title="' + esc(e.country || e.tz || '') + '">' + loc + '</span>' +
         '<div class="fw">' + what + '<span class="fm">' + meta + '</span></div>' +
@@ -274,7 +307,7 @@
       var cr = opts.cr && r.cr != null ? '<span class="cr">' + r.cr + '%</span>' : '';
       return '<div class="bar' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-fk="' + esc(fk) + '" data-fv="' + esc(val) + '"' : '') + ' title="' + esc(label) + '">' +
         '<div class="fill" style="width:' + w + '%"></div>' +
-        '<span class="name">' + esc(label) + '</span><span class="val">' + fmt(r.visitors) + cr + '</span></div>';
+        '<span class="name">' + (opts.icon ? opts.icon(r) : '') + '<span class="txt">' + esc(label) + '</span></span><span class="val">' + fmt(r.visitors) + cr + '</span></div>';
     }).join('');
     if (fk) Array.prototype.forEach.call(el.querySelectorAll('.bar.clickable'), function (b) {
       b.onclick = function () { setFilter(b.getAttribute('data-fk'), b.getAttribute('data-fv')); };
@@ -297,9 +330,9 @@
     el.classList.remove('hide');
     var chips = keys.map(function (k) {
       var v = state.filters[k];
-      var disp = k === 'country' ? (flag(v) + ' ' + (NAMES[v] || v)) : v;
-      return '<span class="chip"><span class="k">' + esc(FILTER_LABELS[k] || k) + '</span>' + esc(disp) +
-        '<button data-rm="' + esc(k) + '" title="Remove">✕</button></span>';
+      var disp = k === 'country' ? (flagIcon(v) + ' ' + esc(NAMES[v] || v)) : k === 'platform' ? (platformIcon(v) + ' ' + esc(platformLabel(v))) : esc(v);
+      return '<span class="chip"><span class="k">' + esc(FILTER_LABELS[k] || k) + '</span>' + disp +
+        '<button data-rm="' + esc(k) + '" title="Remove" aria-label="Remove filter">' + ico('i-x', 'ui') + '</button></span>';
     }).join('');
     el.innerHTML = '<span class="flabel">Filtered by</span>' + chips + '<span class="chip clear" id="clearFilters">Clear all</span>';
     Array.prototype.forEach.call(el.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { removeFilter(b.getAttribute('data-rm')); }; });
@@ -359,7 +392,7 @@
       (showV ? '<path d="' + areaP + '" fill="url(#ag)"/>' : '') +
       (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.85"/>' : '') +
       (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2.4" stroke-linecap="round"/>' : '') +
-      (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="#0b0d12" stroke-width="1.5"/>'; }).join('') : '') +
+      (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="#071114" stroke-width="1.5"/>'; }).join('') : '') +
       hovers;
     var tip = $('tip');
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
@@ -367,7 +400,7 @@
         var d = series[+rect.dataset.i];
         tip.innerHTML = '<strong>' + esc(d.label) + '</strong>' +
           (showV ? '<br>' + d.visitors + ' visitors' : '') +
-          (showP ? '<br>📄 ' + d.pageviews + ' views' : '');
+          (showP ? '<br>' + d.pageviews + ' views' : '');
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
       rect.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
@@ -386,7 +419,8 @@
     'ig': 'Instagram', 'l.instagram.com': 'Instagram', 'homescreen': 'Homescreen (app shortcut)',
     'android-app://com.google.android.googlequicksearchbox': 'Google App (Android)', 't.co': 'X / Twitter',
   };
-  var PLATFORM_NAMES = { web: '🌐 Web', android: '🤖 Android app', ios: '🍏 iOS app', macos: '💻 macOS app', windows: '🪟 Windows app', linux: '🐧 Linux app' };
+  var PLATFORM_NAMES = { web: 'Web', android: 'Android app', ios: 'iOS app', macos: 'macOS app', windows: 'Windows app', linux: 'Linux app' };
+  function platformIcon(n) { return n === 'web' ? ico('i-web', 'ui') : n === 'windows' ? ico('i-desktop', 'ui') : brand(PLATFORM_ICON[n], 'i-mobile'); }
   function platformLabel(n) { return PLATFORM_NAMES[n] || n; }
   state.pfTab = 'platforms';
   function renderPlatformsPanel() {
@@ -396,19 +430,19 @@
     var hasApp = (s.platforms || []).some(function (r) { return r.name !== 'web'; }) || state.filters.platform;
     if (!hasApp) { w.classList.add('hide'); return; }
     w.classList.remove('hide');
-    if (state.pfTab === 'appVersions') bars('p-platforms', s.appVersions || [], { filterKey: 'version', label: function (r) { return 'v' + r.name; } });
-    else bars('p-platforms', s.platforms || [], { filterKey: 'platform', label: function (r) { return platformLabel(r.name); } });
+    if (state.pfTab === 'appVersions') bars('p-platforms', s.appVersions || [], { filterKey: 'version', icon: function () { return ico('i-layers', 'ui'); }, label: function (r) { return 'v' + r.name; } });
+    else bars('p-platforms', s.platforms || [], { filterKey: 'platform', icon: function (r) { return platformIcon(r.name); }, label: function (r) { return platformLabel(r.name); } });
   }
-  function sourceLabel(n) { if (n === 'Direct') return '➜ Direct / none'; var nice = SOURCE_NAMES[n]; return nice ? nice + ' · ' + n : n; }
+  function sourceLabel(n) { if (n === 'Direct') return 'Direct / none'; var nice = SOURCE_NAMES[n]; return nice ? nice + ' · ' + n : n; }
   function renderSourcesPanel() {
     var s = lastStats; if (!s) return;
     var tab = state.srcTab, fk = tab === 'mediums' ? 'medium' : tab === 'campaigns' ? 'campaign' : 'source';
-    bars('p-sources', s[tab] || [], { filterKey: fk, label: function (r) { return tab === 'sources' ? sourceLabel(r.name) : r.name; } });
+    bars('p-sources', s[tab] || [], { filterKey: fk, icon: function (r) { if (tab !== 'sources') return ico(tab === 'campaigns' ? 'i-sparkles' : 'i-sources', 'ui'); if (r.name === 'Direct') return ico('i-direct', 'ui'); if (r.name === 'homescreen') return ico('i-mobile', 'ui'); return brand(sourceBrand(r.name), 'i-sources'); }, label: function (r) { return tab === 'sources' ? sourceLabel(r.name) : r.name; } });
     var el = $('p-sources');
     if (tab === 'sources' && s.paymentReturns && s.paymentReturns.length) {
       var n = s.paymentReturns.reduce(function (a, r) { return a + (r.visitors || 0); }, 0);
       var who = s.paymentReturns.map(function (r) { return r.name; }).join(', ');
-      el.insertAdjacentHTML('beforeend', '<p class="pay-note" title="' + esc(who) + '">💳 ' + fmt(n) + ' returning from payment (' + esc(who) + ') — not counted as a source</p>');
+      el.insertAdjacentHTML('beforeend', '<p class="pay-note" title="' + esc(who) + '">' + ico('i-pay', 'ui') + ' ' + fmt(n) + ' returning from payment (' + esc(who) + ') — not counted as a source</p>');
     }
   }
 
@@ -416,7 +450,7 @@
     try { return new Intl.NumberFormat(navigator.language || 'de-DE', { style: 'currency', currency: cur || 'EUR', maximumFractionDigits: v >= 1000 ? 0 : 2 }).format(v); }
     catch (e) { return (Math.round(v * 100) / 100) + ' ' + (cur || ''); }
   }
-  function pctTxt(p) { return p == null ? '—' : (p >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '%'; }
+  function pctTxt(p) { return p == null ? '—' : (p >= 0 ? '↑ ' : '↓ ') + Math.abs(p) + '%'; }
   function pctCls(p) { return p == null ? '' : (p >= 0 ? 'up' : 'down'); }
 
   // previous-period trend already sits in the stat cards; last year only appears once data reaches back that far
@@ -482,7 +516,7 @@
   function renderSearch() {
     var s = lastStats; if (!s || !s.search) return;
     var rows = s.search[state.searchTab] || [];
-    bars('p-search', rows, { label: function (r) { return '“' + r.name + '”' + (state.searchTab === 'top' && r.zero ? '  ⚠ ' + r.zero + '× no results' : ''); } });
+    bars('p-search', rows, { label: function (r) { return '“' + r.name + '”' + (state.searchTab === 'top' && r.zero ? '  · ' + r.zero + '× no results' : ''); } });
   }
   function renderProps(s) {
     var wrap = $('propsWrap');
@@ -494,7 +528,7 @@
         var w = Math.max(3, Math.round(((v.visitors || 0) / max) * 100));
         return '<div class="bar"><div class="fill" style="width:' + w + '%"></div><span class="name">' + esc(v.name) + '</span><span class="val">' + fmt(v.visitors) + '</span></div>';
       }).join('');
-      return '<div class="card panel"><h3><span class="em">🏷️</span> ' + esc(p.key) + '</h3><div class="bars">' + rows + '</div></div>';
+      return '<div class="card panel"><h3>' + ico('i-goal', 'h') + ' ' + esc(p.key) + '</h3><div class="bars">' + rows + '</div></div>';
     }).join('');
   }
 
@@ -524,13 +558,13 @@
       sparkline('s-pageviews', (s.series || []).map(function (d) { return d.pageviews; }), COL.p);
       renderPagesPanel();
       renderSourcesPanel();
-      bars('p-countries', s.countries, { filterKey: 'country', label: function (r) { return flag(r.name) + ' ' + (NAMES[r.name] || r.name); } });
-      bars('p-browsers', s.browsers, { filterKey: 'browser' });
-      bars('p-os', s.os, { filterKey: 'os' });
-      bars('p-devices', s.devices, { filterKey: 'device' });
+      bars('p-countries', s.countries, { filterKey: 'country', icon: function (r) { return flagIcon(r.name); }, label: function (r) { return NAMES[r.name] || r.name; } });
+      bars('p-browsers', s.browsers, { filterKey: 'browser', icon: function (r) { return r.name === 'App' ? ico('i-mobile', 'ui') : r.name === 'Edge' ? ico('i-browser', 'ui') : brand(BROWSER_ICON[r.name], 'i-browser'); } });
+      bars('p-os', s.os, { filterKey: 'os', icon: function (r) { return r.name === 'Windows' ? ico('i-desktop', 'ui') : brand(OS_ICON[r.name], 'i-os'); } });
+      bars('p-devices', s.devices, { filterKey: 'device', icon: function (r) { return ico(r.name === 'Desktop' ? 'i-desktop' : r.name === 'Tablet' ? 'i-tablet' : 'i-mobile', 'ui'); } });
       renderPlatformsPanel();
       bars('p-languages', s.languages, { filterKey: 'lang' });
-      bars('p-goals', s.goals, { filterKey: 'goal', cr: true, label: function (r) { return '🎯 ' + r.name; } });
+      bars('p-goals', s.goals, { filterKey: 'goal', cr: true, icon: function (r) { return ico(r.name === 'Purchase' ? 'i-cart' : r.name === 'Search' ? 'i-search' : r.name === '404' ? 'i-404' : 'i-goal', 'ui'); }, label: function (r) { return r.name; } });
       renderProps(s);
       renderInsights(s);
       loadJourneys();
@@ -618,14 +652,14 @@
       var mx = (x1 + x2) / 2;
       var p = document.createElementNS(ns, 'path');
       p.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
-      p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.14)' : 'rgba(91,141,239,.28)');
+      p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(138,165,162,.13)' : 'rgba(45,212,191,.26)');
       p.setAttribute('stroke-width', h);
       p.setAttribute('fill', 'none');
       p.style.transition = 'stroke .2s';
-      var tip = l.from + ' → ' + l.to + ' · ' + l.count;
-      p.addEventListener('mouseenter', function (e) { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.35)' : 'rgba(91,141,239,.6)'); showTip(e, tip); });
+      var tip = l.from + ' → ' + (l.to === '✖ exit' ? 'left the site' : l.to) + ' · ' + l.count;
+      p.addEventListener('mouseenter', function (e) { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(138,165,162,.32)' : 'rgba(45,212,191,.6)'); showTip(e, tip); });
       p.addEventListener('mousemove', function (e) { showTip(e, tip); });
-      p.addEventListener('mouseleave', function () { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.14)' : 'rgba(91,141,239,.28)'); hideTip(); });
+      p.addEventListener('mouseleave', function () { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(138,165,162,.13)' : 'rgba(45,212,191,.26)'); hideTip(); });
       svg.appendChild(p);
     });
     Object.keys(pos).forEach(function (k) {
@@ -639,7 +673,8 @@
       var t = document.createElementNS(ns, 'text');
       t.setAttribute('x', n.x + 12); t.setAttribute('y', n.y + Math.min(n.h / 2 + 4, 14));
       t.setAttribute('fill', COL.dim); t.setAttribute('font-size', '11');
-      var label = n.path.length > 22 ? n.path.slice(0, 21) + '…' : n.path;
+      var shown = n.path === '✖ exit' ? 'Left the site' : n.path;
+      var label = shown.length > 22 ? shown.slice(0, 21) + '…' : shown;
       t.textContent = label + ' (' + fmt(n.v) + ')';
       svg.appendChild(t);
     });
@@ -659,7 +694,7 @@
       $('shareModal').classList.remove('hide');
     });
   };
-  $('copyShare').onclick = function () { navigator.clipboard.writeText($('shareUrl').textContent); $('copyShare').textContent = 'Copied ✓'; setTimeout(function () { $('copyShare').textContent = 'Copy link'; }, 1500); };
+  $('copyShare').onclick = function () { navigator.clipboard.writeText($('shareUrl').textContent); $('copyShare').textContent = 'Copied'; setTimeout(function () { $('copyShare').textContent = 'Copy link'; }, 1500); };
   $('revokeShare').onclick = function () { if (shareToken) api('/api/shares/' + shareToken, { method: 'DELETE' }).then(function () { $('shareModal').classList.add('hide'); }); };
   $('closeShare').onclick = function () { $('shareModal').classList.add('hide'); };
 
@@ -681,7 +716,7 @@
             '<button class="funnel-del" data-id="' + f.id + '" title="Delete funnel">×</button></div>';
           st.steps.forEach(function (s, i) {
             var w = max ? Math.max(2, (s.visitors / max) * 100) : 2;
-            html += '<div class="funnel-step"><div class="funnel-label">' + (i + 1) + '. ' + (s.type === 'goal' ? '🎯 ' : '📄 ') + esc(s.label) + '</div>' +
+            html += '<div class="funnel-step"><div class="funnel-label">' + (i + 1) + '. ' + (s.type === 'goal' ? ico('i-goal', 'ui') : ico('i-pages', 'ui')) + ' ' + esc(s.label) + '</div>' +
               '<div class="funnel-bar-wrap"><div class="funnel-bar" style="width:' + w + '%"></div>' +
               '<span class="funnel-nums">' + fmt(s.visitors) + ' · ' + s.pctOfFirst + '%' + (i > 0 ? ' <span class="drop">−' + s.dropFromPrev + '%</span>' : '') + '</span></div></div>';
           });
@@ -736,7 +771,7 @@
   // share mode: resolve the token, lock the UI down to one site, skip login entirely
   function bootShare() {
     fetch('/api/share-info/' + SHARE).then(function (r) { return r.json(); }).then(function (info) {
-      if (info.error) { document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#e6e8ec;background:#0f1115;font-family:sans-serif"><div><h2>🔗 Link expired</h2><p>This share link was revoked or never existed.</p></div></div>'; return; }
+      if (info.error) { document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#e6e8ec;background:#0f1115;font-family:sans-serif"><div><h2>Link expired</h2><p>This share link was revoked or never existed.</p></div></div>'; return; }
       hideLogin();
       state.site = info.domain;
       var sel = $('siteSelect');
