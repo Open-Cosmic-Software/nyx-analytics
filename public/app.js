@@ -256,7 +256,7 @@
     var el = $(id);
     if (p == null) { el.textContent = ''; el.className = 'trend'; return; }
     var up = p >= 0;
-    el.textContent = (up ? '▲ ' : '▼ ') + Math.abs(p) + '%';
+    el.textContent = (up ? '↑ ' : '↓ ') + Math.abs(p) + '%';
     el.className = 'trend ' + (up ? 'up' : 'down');
   }
 
@@ -306,6 +306,34 @@
     var ce = $('clearFilters'); if (ce) ce.onclick = clearFilters;
   }
 
+  // Smooth line through points (Catmull-Rom → cubic Bézier), clamped so it never dips below the baseline.
+  function smoothPath(pts, floorY) {
+    if (!pts.length) return '';
+    if (pts.length < 3) return pts.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
+    var d = 'M' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1);
+    for (var i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      var c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = Math.min(floorY, p1[1] + (p2[1] - p0[1]) / 6);
+      var c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = Math.min(floorY, p2[1] - (p3[1] - p1[1]) / 6);
+      d += ' C' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+    }
+    return d;
+  }
+  // Mini sparkline at the bottom of a KPI card.
+  function sparkline(cardValueId, values, color) {
+    var card = $(cardValueId) && $(cardValueId).parentNode; if (!card) return;
+    var old = card.querySelector('svg.spark'); if (old) old.remove();
+    if (!values || values.length < 2) return;
+    var W = 200, H = 38, mx = Math.max.apply(null, values) || 1;
+    var pts = values.map(function (v, i) { return [(i * W) / (values.length - 1), H - 3 - (v / mx) * (H - 8)]; });
+    var line = smoothPath(pts, H - 1);
+    var gid = 'sg-' + cardValueId;
+    var svg = '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="' + color + '" stop-opacity=".28"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + line + ' L' + W + ' ' + H + ' L0 ' + H + ' Z" fill="url(#' + gid + ')"/>' +
+      '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6" vector-effect="non-scaling-stroke" opacity=".9"/></svg>';
+    card.insertAdjacentHTML('beforeend', svg);
+  }
   function drawChart(series) {
     var svg = $('chart'); var W = 800, H = 220, pad = 8;
     var showV = state.show.visitors, showP = state.show.pageviews;
@@ -316,9 +344,7 @@
     var n = series.length;
     var x = function (i) { return pad + (i * (W - 2 * pad)) / Math.max(1, n - 1); };
     var y = function (v) { return H - pad - (v / max) * (H - 2 * pad); };
-    function path(key) {
-      return series.map(function (d, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(d[key]).toFixed(1); }).join(' ');
-    }
+    function path(key) { return smoothPath(series.map(function (d, i) { return [x(i), y(d[key])]; }), H - pad); }
     var areaP = path('visitors') + ' L' + x(n - 1).toFixed(1) + ' ' + (H - pad) + ' L' + x(0).toFixed(1) + ' ' + (H - pad) + ' Z';
     var hovers = series.map(function (d, i) {
       var w = (W - 2 * pad) / Math.max(1, n);
@@ -327,12 +353,13 @@
     }).join('');
     svg.innerHTML =
       '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">' +
-      '<stop offset="0%" stop-color="' + COL.v + '" stop-opacity="0.22"/><stop offset="100%" stop-color="' + COL.v + '" stop-opacity="0"/>' +
+      '<stop offset="0%" stop-color="' + COL.v + '" stop-opacity="0.32"/><stop offset="100%" stop-color="' + COL.v + '" stop-opacity="0"/>' +
       '</linearGradient></defs>' +
+      [0.25, 0.5, 0.75].map(function (f) { var gy = (pad + f * (H - 2 * pad)).toFixed(1); return '<line x1="0" x2="' + W + '" y1="' + gy + '" y2="' + gy + '" stroke="rgba(255,255,255,.05)" stroke-dasharray="2 6" vector-effect="non-scaling-stroke"/>'; }).join('') +
       (showV ? '<path d="' + areaP + '" fill="url(#ag)"/>' : '') +
-      (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.5" opacity="0.9"/>' : '') +
-      (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2"/>' : '') +
-      (showV ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2" fill="' + COL.v + '"/>'; }).join('') : '') +
+      (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.85"/>' : '') +
+      (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2.4" stroke-linecap="round"/>' : '') +
+      (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="#0b0d12" stroke-width="1.5"/>'; }).join('') : '') +
       hovers;
     var tip = $('tip');
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
@@ -493,6 +520,8 @@
       trend('t-visitors', s.trend && s.trend.visitors);
       trend('t-pageviews', s.trend && s.trend.pageviews);
       drawChart(s.series);
+      sparkline('s-visitors', (s.series || []).map(function (d) { return d.visitors; }), COL.v);
+      sparkline('s-pageviews', (s.series || []).map(function (d) { return d.pageviews; }), COL.p);
       renderPagesPanel();
       renderSourcesPanel();
       bars('p-countries', s.countries, { filterKey: 'country', label: function (r) { return flag(r.name) + ' ' + (NAMES[r.name] || r.name); } });

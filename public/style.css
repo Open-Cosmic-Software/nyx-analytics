@@ -1,3 +1,7 @@
+/* Inter (SIL OFL 1.1, see assets/fonts/Inter-OFL.txt) — self-hosted, no third-party requests */
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 100 900; src: url('/assets/fonts/inter-latin-wght-normal.woff2') format('woff2-variations'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Inter'; font-style: normal; font-display: swap; font-weight: 100 900; src: url('/assets/fonts/inter-latin-ext-wght-normal.woff2') format('woff2-variations'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
 /* Tacilytics — calm, professional dark theme (14.10.2026). One accent, no glow, numbers first. */
 :root {
   --accent: #5b8def;
@@ -209,7 +213,7 @@ p.hint { margin: -4px 0 8px; }
 .snip-tabs button.active { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 
 /* 14.10.2026 professional theme: layout polish */
-.container { max-width: 1200px; padding: 20px 24px 48px; }
+.container { max-width: 1200px; padding: 0 24px 48px; }
 .stats { gap: 12px; }
 .panels { gap: 12px; }
 .chart-card { padding: 18px 20px; }
@@ -218,3 +222,96 @@ p.hint { margin: -4px 0 8px; }
 .empty { color: var(--text-faint); }
 .footer-note { margin-top: 28px; font-size: .74rem; color: var(--text-faint); text-align: center; }
 .footer-note a { color: var(--text-dim); }
+
+/* ── 14.10.2026 v2: modern polish (Fabian: „hübscher, moderner“) ── */
+:root {
+  --accent: #6d8cff;
+  --accent-2: #a78bfa;
+  --accent-soft: rgba(109, 140, 255, 0.13);
+  --accent-line: rgba(109, 140, 255, 0.42);
+  --chart-visitors: #6d8cff;
+  --chart-pageviews: #a78bfa;
+  --bg: #0b0d12;
+  --surface: rgba(23, 26, 34, 0.72);
+  --surface-2: #1e222c;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.12);
+  --radius: 16px;
+  --shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px -12px rgba(0,0,0,.55);
+}
+body {
+  background:
+    radial-gradient(1100px 520px at 12% -10%, rgba(109,140,255,.10), transparent 60%),
+    radial-gradient(900px 480px at 100% 0%, rgba(167,139,250,.07), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  font-size: 14.5px; letter-spacing: -0.006em;
+}
+/* sticky glass header */
+header {
+  position: sticky; top: 0; z-index: 40; margin: 0 -24px 22px; padding: 14px 24px;
+  background: rgba(11,13,18,.72); backdrop-filter: saturate(160%) blur(14px); -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.brand .logo { width: 32px; height: 32px; border-radius: 9px; box-shadow: 0 0 0 1px var(--line-strong), 0 6px 20px -6px rgba(109,140,255,.55); }
+.brand h1 { font-size: 1.08rem; font-weight: 700; letter-spacing: -.02em; }
+/* cards: soft glass, gentle lift */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(10px); transition: border-color .2s, transform .2s, box-shadow .2s; }
+.card:hover { border-color: var(--line-strong); }
+.stats .card:hover, .commerce .card:hover { transform: translateY(-1px); box-shadow: var(--shadow), 0 14px 34px -18px rgba(109,140,255,.35); }
+/* KPI cards: big tabular numbers, trend as pill, mini sparkline */
+.stat { padding: 18px 20px 14px; min-height: 124px; }
+.stat .label { font-size: .76rem; font-weight: 500; color: var(--text-dim); letter-spacing: 0; text-transform: none; }
+.stat .value { font-size: 2rem; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; }
+.trend { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; font-size: .72rem; font-weight: 600; margin-top: 8px; }
+.trend.up { color: #4ade80; background: rgba(74,222,128,.10); }
+.trend.down { color: #fb7185; background: rgba(251,113,133,.10); }
+.trend:empty { display: none; }
+.spark { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 38px; pointer-events: none; opacity: .9; }
+.stat > .label, .stat > .value, .stat > .trend, .stat > .yoy { position: relative; z-index: 1; }
+/* first KPI gets a subtle accent edge */
+.stats .stat:first-child { background: linear-gradient(160deg, rgba(109,140,255,.16), rgba(23,26,34,.72) 55%); border-color: rgba(109,140,255,.28); }
+.commerce .stat:first-child { background: linear-gradient(160deg, rgba(74,222,128,.12), rgba(23,26,34,.72) 55%); border-color: rgba(74,222,128,.22); }
+/* segmented controls */
+.periods { background: rgba(255,255,255,.03); border-color: var(--line); border-radius: 12px; padding: 4px; }
+.periods button { border-radius: 9px; padding: 7px 13px; }
+.periods button.active { background: var(--surface-2); box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 2px 8px rgba(0,0,0,.35); }
+.btn { border-radius: 10px; padding: 8px 14px; box-shadow: 0 6px 18px -8px rgba(109,140,255,.7); }
+.btn:hover { background: #5b7cf5; border-color: #5b7cf5; }
+.btn.ghost { box-shadow: none; background: rgba(255,255,255,.03); }
+.btn.ghost:hover { background: rgba(255,255,255,.06); }
+select, input { border-radius: 10px; background: rgba(255,255,255,.03); }
+.realtime { background: rgba(74,222,128,.07); border-color: rgba(74,222,128,.2); color: #b8f5cd; }
+.realtime .dot { box-shadow: 0 0 0 3px rgba(74,222,128,.18); }
+/* chart card */
+.chart-card { padding: 20px 22px 14px; }
+.chart-head strong { font-size: .95rem; font-weight: 650; }
+#chart { height: 240px; }
+.chart-head .legend .leg { border-radius: 999px; padding: 4px 10px; }
+.swatch { width: 8px; height: 8px; border-radius: 50%; }
+/* panels */
+.panel h3 { font-size: .9rem; font-weight: 650; letter-spacing: -.01em; }
+.panel h3 .em { filter: none; opacity: .9; }
+.bar { border-radius: 8px; padding: 8px 11px; }
+.bar .fill { border-radius: 8px; background: linear-gradient(90deg, rgba(109,140,255,.20), rgba(167,139,250,.08)); }
+.bar:hover .fill { background: linear-gradient(90deg, rgba(109,140,255,.30), rgba(167,139,250,.14)); }
+.bar .val { color: var(--text); font-weight: 600; opacity: .85; }
+.panel h3 .tabs { border-radius: 9px; background: rgba(255,255,255,.03); }
+.panel h3 .tabs button { border-radius: 7px; }
+/* modals */
+.modal { background: rgba(23,26,34,.92); backdrop-filter: blur(18px); border-radius: 20px; box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px var(--line-strong); }
+.modal-overlay { backdrop-filter: blur(6px); }
+/* login screen gets a hero glow */
+#login { background: radial-gradient(700px 420px at 50% 30%, rgba(109,140,255,.16), transparent 65%), rgba(6,7,10,.86); }
+#login .modal .logo { width: 56px; height: 56px; border-radius: 15px; box-shadow: 0 10px 30px -8px rgba(109,140,255,.7); }
+/* fade-in on load */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#dash > * { animation: rise .35s ease both; }
+#dash > *:nth-child(2) { animation-delay: .04s; } #dash > *:nth-child(3) { animation-delay: .08s; } #dash > *:nth-child(4) { animation-delay: .12s; }
+.chip { border-radius: 999px; }
+@media (max-width: 760px) { header { margin: 0 -16px 18px; padding: 12px 16px; } .container { padding: 0 16px 40px; } .stat .value { font-size: 1.6rem; } }
+.stats .stat { padding-bottom: 40px; min-height: 0; }
+.commerce .stat { min-height: 0; }
+.spark { height: 32px; opacity: .8; }
+/* page paths read better in a tight mono with tabular feel */
+#p-pages .bar .name, #p-404 .bar .name, .feed-row .path { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace; font-size: .8rem; letter-spacing: -.01em; }
