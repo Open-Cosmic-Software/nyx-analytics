@@ -3,28 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nyx Analytics 🦞</title>
+<title>Tacilytics</title>
 <meta name="robots" content="noindex">
-<link rel="icon" href="/assets/nyx-logo-256.png">
-<link rel="stylesheet" href="/style.css?v=1.4.0">
+<link rel="icon" href="/assets/tacilytics-mark.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0f1115">
+<link rel="stylesheet" href="/style.css?v=2.0.0">
 </head>
 <body>
-<!-- cosmic background -->
-<div class="cosmic-bg"></div>
-<div class="cosmic-overlay"></div>
-<div class="starfield"><div class="stars"></div><div class="stars"></div><div class="stars"></div></div>
-<div class="shooting-star"></div>
-<div class="shooting-star"></div>
 
 <!-- Login -->
 <div id="login" class="modal-overlay">
   <div class="modal">
-    <img class="logo" src="/assets/nyx-logo-256.png" alt="Nyx">
-    <h2 class="grad-text">Nyx Analytics</h2>
-    <p>Cosmic, cookieless analytics. Enter the passphrase.</p>
+    <img class="logo" src="/assets/tacilytics-mark.svg" alt="">
+    <h2>Tacilytics</h2>
+    <p>Cookieless analytics. Sign in with your passphrase.</p>
     <div id="loginErr" class="err"></div>
     <input id="pw" type="password" placeholder="Passphrase" autocomplete="current-password">
-    <button class="btn" id="loginBtn">Enter the void →</button>
+    <button class="btn" id="loginBtn">Sign in</button>
   </div>
 </div>
 
@@ -32,17 +27,17 @@
 <div id="app" class="container hide">
   <header>
     <div class="brand">
-      <img class="logo" src="/assets/nyx-logo-256.png" alt="Nyx">
+      <img class="logo" src="/assets/tacilytics-mark.svg" alt="">
       <div>
-        <h1 class="grad-text">Nyx Analytics</h1>
-        <div class="subtitle">cosmic · cookieless · yours</div>
+        <h1>Tacilytics</h1>
+        <div class="subtitle">Cookieless analytics · we count, we don't tell</div>
       </div>
     </div>
     <div class="header-right">
       <div class="realtime" id="realtimeBtn" title="View live visitors" style="cursor:pointer"><span class="dot"></span><span id="realtime">0</span> online now</div>
       <select id="siteSelect"></select>
       <button class="btn ghost" id="addSiteBtn">+ Add site</button>
-      <button class="btn ghost danger" id="logoutBtn">Logout</button>
+      <button class="btn ghost danger" id="logoutBtn">Sign out</button>
     </div>
   </header>
 
@@ -89,8 +84,8 @@
       <div class="chart-head">
         <strong id="chartTitle">Visitors</strong>
         <div class="legend">
-          <button type="button" class="leg" id="leg-visitors" data-key="visitors" aria-pressed="true"><span class="swatch" style="background:#e879a8"></span>Visitors</button>
-          <button type="button" class="leg" id="leg-pageviews" data-key="pageviews" aria-pressed="true"><span class="swatch" style="background:#67e8f9"></span>Pageviews</button>
+          <button type="button" class="leg" id="leg-visitors" data-key="visitors" aria-pressed="true"><span class="swatch" style="background:var(--chart-visitors)"></span>Visitors</button>
+          <button type="button" class="leg" id="leg-pageviews" data-key="pageviews" aria-pressed="true"><span class="swatch" style="background:var(--chart-pageviews)"></span>Pageviews</button>
         </div>
       </div>
       <svg id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
@@ -155,6 +150,7 @@
 
     <!-- custom-event properties (shown when drilled into a single goal) -->
     <div id="propsWrap" class="panels hide" style="margin-top:16px"></div>
+    <p class="footer-note">Tacilytics · open source · <a href="https://github.com/Open-Cosmic-Software/tacilytics" target="_blank" rel="noopener">GitHub</a></p>
   </div>
 </div>
 
@@ -162,7 +158,7 @@
 <div id="addModal" class="modal-overlay hide">
   <div class="modal">
     <span class="logo em">🛰️</span>
-    <h2 class="grad-text">Add a site</h2>
+    <h2>Add a site</h2>
     <p>Enter the domain you want to track.</p>
     <div id="addErr" class="err"></div>
     <input id="newDomain" type="text" placeholder="example.com" autocomplete="off">
@@ -175,7 +171,7 @@
 <div id="snippetModal" class="modal-overlay hide">
   <div class="modal modal-wide">
     <span class="logo em">&lt;/&gt;</span>
-    <h2 class="grad-text">Add tracking</h2>
+    <h2>Add tracking</h2>
     <p style="margin-bottom:12px">for <strong id="snipDomain"></strong>. Same dashboard for website and apps.</p>
     <div class="tabs snip-tabs" id="snipTabs">
       <button data-t="web" class="active">🌐 Website</button>
@@ -197,7 +193,7 @@
 <div id="shareModal" class="modal-overlay hide">
   <div class="modal">
     <span class="logo em">🔗</span>
-    <h2 class="grad-text">Share dashboard</h2>
+    <h2>Share dashboard</h2>
     <p>Anyone with this link can view stats for <strong id="shareDomain"></strong> — read-only, no login.</p>
     <div class="snippet" id="shareUrl" style="word-break:break-all"></div>
     <button class="btn" id="copyShare">Copy link</button>
@@ -210,7 +206,7 @@
 <div id="funnelModal" class="modal-overlay hide">
   <div class="modal">
     <span class="logo em">🌀</span>
-    <h2 class="grad-text">New funnel</h2>
+    <h2>New funnel</h2>
     <p>2–8 ordered steps. A visitor advances only after completing the previous step.</p>
     <div id="funnelErr" class="err"></div>
     <input id="funnelName" type="text" placeholder="Funnel name, e.g. Signup flow" autocomplete="off">
@@ -225,7 +221,7 @@
 <div id="liveModal" class="modal-overlay hide">
   <div class="modal live">
     <div class="live-head">
-      <h2 class="grad-text">🛰️ Live</h2>
+      <h2>Live</h2>
       <span class="realtime"><span class="dot"></span><span id="live-online">0</span> online</span>
     </div>
     <p class="live-sub">Visitors over the last 30 minutes · updates every few seconds</p>
@@ -237,6 +233,6 @@
 </div>
 
 <div class="tip" id="tip"></div>
-<script src="/app.js?v=1.4.0"></script>
+<script src="/app.js?v=2.0.0"></script>
 </body>
 </html>

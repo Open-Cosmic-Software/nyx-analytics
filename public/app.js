@@ -1,4 +1,4 @@
-/* Nyx Analytics dashboard 🦞 */
+/* Tacilytics dashboard */
 (function () {
   var TOKEN = localStorage.getItem('nyx_token') || '';
   // share mode: /share/<token> renders a read-only dashboard without login
@@ -31,6 +31,10 @@
   function clearFilters() { state.filters = {}; load(); }
   var $ = function (id) { return document.getElementById(id); };
   var ORIGIN = location.origin;
+  // chart palette comes from CSS custom properties (single source of truth for the theme)
+  var CSSV = getComputedStyle(document.documentElement);
+  function cv(name, fb) { return (CSSV.getPropertyValue(name) || '').trim() || fb; }
+  var COL = { v: cv('--chart-visitors', '#5b8def'), p: cv('--chart-pageviews', '#8b93a3'), red: cv('--red', '#f87171'), dim: cv('--text-dim', '#8b93a3'), line: cv('--line-strong', '#323946') };
   // Escape any value that originates from visitor beacons before it touches innerHTML.
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
@@ -95,18 +99,18 @@
   $('newDomain').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('createSiteBtn').click(); });
 
   // ── snippet: website, Flutter app, any other app (same site, platform tells them apart) ──
-  var SNIP_REPO = 'https://github.com/Open-Cosmic-Software/nyx-analytics';
+  var SNIP_REPO = 'https://github.com/Open-Cosmic-Software/tacilytics';
   state.snipTab = 'web';
   function snippetFor(domain) {
-    return '<script defer data-domain="' + domain + '" src="' + ORIGIN + '/nyx.js"><\/script>';
+    return '<script defer data-domain="' + domain + '" src="' + ORIGIN + '/tacilytics.js"><\/script>';
   }
   function snipParts(domain, tab) {
     if (tab === 'flutter') return {
       s1: '1 · Add the package to <code>pubspec.yaml</code>, then run <code>flutter pub get</code>:',
-      c1: 'dependencies:\n  nyx_analytics:\n    git:\n      url: ' + SNIP_REPO + '\n      path: sdk/flutter',
+      c1: 'dependencies:\n  tacilytics:\n    git:\n      url: ' + SNIP_REPO + '\n      path: sdk/flutter',
       s2: '2 · Start it in <code>main()</code> — screens are tracked automatically:',
-      c2: "import 'package:nyx_analytics/nyx_analytics.dart';\n\nvoid main() {\n  NyxAnalytics.init(\n    endpoint: '" + ORIGIN + "',\n    domain: '" + domain + "',\n    appVersion: '1.0.0',\n    enabled: true,\n  );\n  runApp(MaterialApp(\n    navigatorObservers: [NyxRouteObserver()],\n    home: const MyHome(),\n  ));\n}",
-      hint: 'Goals &amp; revenue anywhere in your code:<br><code>NyxAnalytics.instance.event(\'Signup\')</code> · <code>.search(\'term\', 6)</code> · <code>.purchase(value: 49.90)</code><br><span style="opacity:.7">No cookies, no device id. Want it only after consent? Leave out <code>enabled: true</code> and call <code>setEnabled(true)</code> later.</span>'
+      c2: "import 'package:tacilytics/tacilytics.dart';\n\nvoid main() {\n  Tacilytics.init(\n    endpoint: '" + ORIGIN + "',\n    domain: '" + domain + "',\n    appVersion: '1.0.0',\n    enabled: true,\n  );\n  runApp(MaterialApp(\n    navigatorObservers: [TacilyticsRouteObserver()],\n    home: const MyHome(),\n  ));\n}",
+      hint: 'Goals &amp; revenue anywhere in your code:<br><code>Tacilytics.instance.event(\'Signup\')</code> · <code>.search(\'term\', 6)</code> · <code>.purchase(value: 49.90)</code><br><span style="opacity:.7">No cookies, no device id. Want it only after consent? Leave out <code>enabled: true</code> and call <code>setEnabled(true)</code> later.</span>'
     };
     if (tab === 'other') return {
       s1: 'Swift, Kotlin, React Native, Unity … — send one JSON <code>POST</code> per screen or event:',
@@ -118,7 +122,7 @@
     return {
       s1: 'Paste this once into the <code>&lt;head&gt;</code> of your site:',
       c1: snippetFor(domain), s2: '', c2: '',
-      hint: 'Track goals &amp; properties from your code:<br><code>nyx(\'Signup\')</code> · <code>nyx(\'Signup\', { plan: \'pro\' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code>data-honor-dnt</code> · <code>data-track-outbound</code></span>'
+      hint: 'Track goals &amp; properties from your code:<br><code>tacilytics(\'Signup\')</code> · <code>tacilytics(\'Signup\', { plan: \'pro\' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code>data-honor-dnt</code> · <code>data-track-outbound</code></span>'
     };
   }
   function renderSnippet() {
@@ -157,7 +161,7 @@
     var blob = new Blob([csv], { type: 'text/csv' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'nyx-' + state.site + '-' + state.period + '.csv';
+    a.download = 'tacilytics-' + state.site + '-' + state.period + '.csv';
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -186,7 +190,7 @@
     var bw = W / n;
     svg.innerHTML = minutes.map(function (m, i) {
       var h = m.pageviews ? Math.max(3, Math.round((m.pageviews / max) * (H - 6))) : 0;
-      return '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (H - h) + '" width="' + (bw - 2).toFixed(1) + '" height="' + h + '" rx="2" fill="' + (i >= n - 5 ? '#e879a8' : 'rgba(168,85,247,.5)') + '"></rect>';
+      return '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + (H - h) + '" width="' + (bw - 2).toFixed(1) + '" height="' + h + '" rx="2" fill="' + (i >= n - 5 ? COL.v : COL.line) + '"></rect>';
     }).join('');
   }
   function timeAgo(ts, now) {
@@ -323,19 +327,19 @@
     }).join('');
     svg.innerHTML =
       '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">' +
-      '<stop offset="0%" stop-color="#e879a8" stop-opacity="0.35"/><stop offset="100%" stop-color="#e879a8" stop-opacity="0"/>' +
+      '<stop offset="0%" stop-color="' + COL.v + '" stop-opacity="0.22"/><stop offset="100%" stop-color="' + COL.v + '" stop-opacity="0"/>' +
       '</linearGradient></defs>' +
       (showV ? '<path d="' + areaP + '" fill="url(#ag)"/>' : '') +
-      (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="#67e8f9" stroke-width="2" opacity="0.85"/>' : '') +
-      (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="#e879a8" stroke-width="2.5"/>' : '') +
-      (showV ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.5" fill="#e879a8"/>'; }).join('') : '') +
+      (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.5" opacity="0.9"/>' : '') +
+      (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2"/>' : '') +
+      (showV ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2" fill="' + COL.v + '"/>'; }).join('') : '') +
       hovers;
     var tip = $('tip');
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
       rect.addEventListener('mousemove', function (e) {
         var d = series[+rect.dataset.i];
         tip.innerHTML = '<strong>' + esc(d.label) + '</strong>' +
-          (showV ? '<br>🦞 ' + d.visitors + ' visitors' : '') +
+          (showV ? '<br>' + d.visitors + ' visitors' : '') +
           (showP ? '<br>📄 ' + d.pageviews + ' views' : '');
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
@@ -585,14 +589,14 @@
       var mx = (x1 + x2) / 2;
       var p = document.createElementNS(ns, 'path');
       p.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
-      p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.28)' : 'rgba(103,232,249,.30)');
+      p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.14)' : 'rgba(91,141,239,.28)');
       p.setAttribute('stroke-width', h);
       p.setAttribute('fill', 'none');
       p.style.transition = 'stroke .2s';
       var tip = l.from + ' → ' + l.to + ' · ' + l.count;
-      p.addEventListener('mouseenter', function (e) { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.6)' : 'rgba(232,121,168,.6)'); showTip(e, tip); });
+      p.addEventListener('mouseenter', function (e) { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.35)' : 'rgba(91,141,239,.6)'); showTip(e, tip); });
       p.addEventListener('mousemove', function (e) { showTip(e, tip); });
-      p.addEventListener('mouseleave', function () { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(248,113,113,.28)' : 'rgba(103,232,249,.30)'); hideTip(); });
+      p.addEventListener('mouseleave', function () { p.setAttribute('stroke', l.to === '✖ exit' ? 'rgba(139,147,163,.14)' : 'rgba(91,141,239,.28)'); hideTip(); });
       svg.appendChild(p);
     });
     Object.keys(pos).forEach(function (k) {
@@ -601,11 +605,11 @@
       r.setAttribute('x', n.x); r.setAttribute('y', n.y);
       r.setAttribute('width', 8); r.setAttribute('height', n.h);
       r.setAttribute('rx', 2);
-      r.setAttribute('fill', n.path === '✖ exit' ? '#f87171' : n.path === '…' ? '#888' : '#e879a8');
+      r.setAttribute('fill', n.path === '✖ exit' ? COL.line : n.path === '…' ? COL.dim : COL.v);
       svg.appendChild(r);
       var t = document.createElementNS(ns, 'text');
       t.setAttribute('x', n.x + 12); t.setAttribute('y', n.y + Math.min(n.h / 2 + 4, 14));
-      t.setAttribute('fill', '#cbd5e1'); t.setAttribute('font-size', '11');
+      t.setAttribute('fill', COL.dim); t.setAttribute('font-size', '11');
       var label = n.path.length > 22 ? n.path.slice(0, 21) + '…' : n.path;
       t.textContent = label + ' (' + fmt(n.v) + ')';
       svg.appendChild(t);
@@ -703,7 +707,7 @@
   // share mode: resolve the token, lock the UI down to one site, skip login entirely
   function bootShare() {
     fetch('/api/share-info/' + SHARE).then(function (r) { return r.json(); }).then(function (info) {
-      if (info.error) { document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#e879a8;font-family:sans-serif"><div><h2>🔗 Link expired</h2><p>This share link was revoked or never existed.</p></div></div>'; return; }
+      if (info.error) { document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#e6e8ec;background:#0f1115;font-family:sans-serif"><div><h2>🔗 Link expired</h2><p>This share link was revoked or never existed.</p></div></div>'; return; }
       hideLogin();
       state.site = info.domain;
       var sel = $('siteSelect');
