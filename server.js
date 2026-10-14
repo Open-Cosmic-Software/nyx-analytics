@@ -12,20 +12,28 @@ const express = require('express');
 const Database = require('better-sqlite3');
 
 // ── tiny .env loader (no dep) ───────────────────────────────────────────────
-try {
-  const env = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
-  for (const line of env.split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-  }
-} catch {}
+// Reads .env from the current directory first (npm/npx installs), then next to server.js (git checkout).
+for (const dir of [...new Set([process.cwd(), __dirname])]) {
+  try {
+    const env = fs.readFileSync(path.join(dir, '.env'), 'utf8');
+    for (const line of env.split('\n')) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+    }
+  } catch {}
+}
 
 const PORT = parseInt(process.env.PORT) || 3920;
 const WEB_PASSWORD = process.env.WEB_PASSWORD || 'tacilytics';
 const API_KEY = process.env.API_KEY || ''; // for agents / CLI (Bearer token)
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(16).toString('hex');
 const INGEST_SALT = process.env.INGEST_SALT || 'tacilytics-salt'; // set your own in .env — changing it splits today's visitors
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'analytics.db');
+// Git checkout: data/ next to server.js (as always). npm install: data/ in the directory you start from,
+// never inside node_modules (an update would wipe it).
+const INSIDE_NODE_MODULES = __dirname.split(path.sep).includes('node_modules');
+const DB_PATH = process.env.DB_PATH || path.join(INSIDE_NODE_MODULES ? process.cwd() : __dirname, 'data', 'analytics.db');
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+if (!process.env.WEB_PASSWORD) console.warn('⚠ WEB_PASSWORD is not set — the dashboard uses the default passphrase "tacilytics". Set your own in .env.');
 const RETENTION_DAYS = parseInt(process.env.DATA_RETENTION_DAYS, 10) || 0; // 0 = keep forever; >0 purges older raw events (data minimisation)
 
 // ── DB ──────────────────────────────────────────────────────────────────────

@@ -37,6 +37,18 @@
 
 ## Quick start
 
+**With npm** (fastest):
+
+```bash
+mkdir my-analytics && cd my-analytics
+npx tacilytics serve      # http://127.0.0.1:3920 — data/ and .env live in this folder
+```
+
+Or install it globally: `npm i -g tacilytics`, then `tacilytics serve`.
+Set your own `WEB_PASSWORD`, `SESSION_SECRET`, `INGEST_SALT` and `API_KEY` in a `.env` file in that folder (see [`.env.example`](.env.example)).
+
+**From source:**
+
 ```bash
 git clone https://github.com/Open-Cosmic-Software/tacilytics.git
 cd tacilytics

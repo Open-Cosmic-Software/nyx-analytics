@@ -3,6 +3,8 @@
  *
  *   export TACILYTICS_URL=https://analytics.example.com
  *   export TACILYTICS_API_KEY=xxx
+ *   tacilytics serve            (start the server; data/ and .env in the current directory)
+ *   tacilytics serve       start the server (data/ and .env in the current folder)
  *   tacilytics sites
  *   tacilytics stats example.com 30d
  *   tacilytics live example.com --watch
@@ -141,6 +143,7 @@ ${pink('Tacilytics CLI')}
 
 ${bold('Usage')}  tacilytics <command> [--json] [--watch]
 
+  ${cyan('serve')}                     start the server (data/ + .env in the current folder)
   ${cyan('sites')}                     list tracked sites
   ${cyan('stats')} <domain> [period]   key metrics + breakdowns (today|7d|30d|90d|12mo)
   ${cyan('live')} <domain> [--watch]   online visitors + last-30-min feed
@@ -160,6 +163,7 @@ ${dim('Add --json for machine-readable output (agents).')}
 
 (async () => {
   try {
+    if (cmd === 'serve' || cmd === 'start') { require('./server.js'); return; }
     if (cmd === 'sites') await cmdSites();
     else if (cmd === 'stats') await cmdStats();
     else if (cmd === 'live' || cmd === 'realtime') await cmdLive();

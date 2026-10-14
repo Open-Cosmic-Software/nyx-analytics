@@ -1,7 +1,7 @@
 {
   "name": "tacilytics",
   "version": "2.0.0",
-  "description": "Tacilytics \u2014 privacy-first, cookieless analytics for websites and apps. Self-hosted, no banner, Flutter SDK, agent API + CLI.",
+  "description": "Privacy-first, cookieless analytics for websites and apps. Self-hosted: one Node process, one SQLite file.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -9,7 +9,7 @@
     "cli": "node cli.js",
     "test": "node --test test/*.test.js"
   },
-  "author": "Nyx & Fabian",
+  "author": "Nyx 🦞 & Fabian Budde",
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^12.10.0",
@@ -23,5 +23,36 @@
     "type": "git",
     "url": "https://github.com/Open-Cosmic-Software/tacilytics.git"
   },
-  "homepage": "https://github.com/Open-Cosmic-Software/tacilytics"
+  "homepage": "https://github.com/Open-Cosmic-Software/tacilytics#readme",
+  "keywords": [
+    "analytics",
+    "privacy",
+    "cookieless",
+    "gdpr",
+    "self-hosted",
+    "web-analytics",
+    "sqlite",
+    "plausible-alternative",
+    "flutter",
+    "app-analytics"
+  ],
+  "bugs": {
+    "url": "https://github.com/Open-Cosmic-Software/tacilytics/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "server.js",
+    "cli.js",
+    "day-salt.js",
+    "tz-country.js",
+    "public/",
+    "sdk/flutter/",
+    "!sdk/flutter/.dart_tool/",
+    "!sdk/flutter/build/",
+    ".env.example",
+    "LICENSE",
+    "README.md"
+  ]
 }
