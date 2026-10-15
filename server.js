@@ -141,8 +141,10 @@ db.exec(`
 `);
 
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
+// per-site time zone (Fabian): only query boundaries move, stored days stay UTC (Tyto). Old installs → 'UTC'.
+if (!db.prepare('PRAGMA table_info(sites)').all().some((c) => c.name === 'timezone')) db.exec("ALTER TABLE sites ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
-const insSite = db.prepare('INSERT OR IGNORE INTO sites (domain, name, created) VALUES (?, ?, ?)');
+const insSite = db.prepare("INSERT OR IGNORE INTO sites (domain, name, created, timezone) VALUES (?, ?, ?, COALESCE(?, 'UTC'))");
 const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
 const insEvent = db.prepare(`INSERT INTO events (site_id, ts, day, path, source, referrer, country, tz, browser, os, device, lang, name, utm_medium, utm_campaign, dur, props, vh, platform, app_version)
   VALUES (@site_id, @ts, @day, @path, @source, @referrer, @country, @tz, @browser, @os, @device, @lang, @name, @utm_medium, @utm_campaign, @dur, @props, @vh, @platform, @app_version)`);
@@ -418,12 +420,27 @@ const sitesCreateHandler = (req, res) => {
   }
   // Allow ASCII domains AND Punycode (xn--...). Unicode input was converted above.
   if (!domain || !/^[a-z0-9.-]+\.[a-z0-9-]{2,}$/.test(domain)) return res.status(400).json({ error: 'Enter a valid domain, e.g. example.com' });
-  insSite.run(domain, (req.body && req.body.name) || displayName, Date.now());
+  const rawTz = req.body && req.body.timezone;
+  const timezone = rawTz == null || rawTz === '' ? null : TZ.validTz(String(rawTz));
+  if (rawTz != null && rawTz !== '' && !timezone) return res.status(400).json({ error: 'Unknown time zone' });
+  insSite.run(domain, (req.body && req.body.name) || displayName, Date.now(), timezone);
   audit(res, 'site.add', domain);
   res.json(getSiteByDomain.get(domain));
 };
 app.get('/api/sites', auth, sitesListHandler);
 app.post('/api/sites', adminOnly, sitesCreateHandler);
+// change a site's time zone (IANA names only — anything Intl rejects is a 400, never stored)
+app.patch('/api/sites/:id', adminOnly, (req, res) => {
+  const id = Number(req.params.id);
+  if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
+  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(id);
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  const timezone = TZ.validTz(String((req.body && req.body.timezone) || ''));
+  if (!timezone) return res.status(400).json({ error: 'Unknown time zone' });
+  db.prepare('UPDATE sites SET timezone = ? WHERE id = ?').run(timezone, id);
+  if (timezone !== site.timezone) audit(res, 'site.timezone', site.domain + ': ' + site.timezone + ' → ' + timezone);
+  res.json(db.prepare('SELECT * FROM sites WHERE id = ?').get(id));
+});
 app.delete('/api/sites/:id', adminOnly, (req, res) => {
   const id = Number(req.params.id);
   if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
@@ -454,24 +471,30 @@ app.get('/api/v1/sites', auth, sitesListHandler);
 app.post('/api/v1/sites', adminOnly, sitesCreateHandler);
 
 // ── stats ────────────────────────────────────────────────────────────────────
+const TZ = require('./tz');
 const PERIODS = { today: 1, '7d': 7, '30d': 30, '90d': 90, '12mo': 365 };
-function rangeFor(query) {
+// Whole LOCAL days of the site's time zone: "7d" = today + the 6 full days before it, each day with
+// its own boundaries (23/25 h on DST days). Starting at now - 7×24h would cut the oldest day off at the
+// current clock time and undercount it.
+function rangeFor(query, tz) {
+  tz = tz || 'UTC';
   const now = Date.now();
-  // custom range: from/to are YYYY-MM-DD (inclusive)
-  const from = /^\d{4}-\d{2}-\d{2}$/.test(query.from || '') ? Date.parse(query.from + 'T00:00:00Z') : null;
-  if (from != null && !Number.isNaN(from)) {
-    const toRaw = /^\d{4}-\d{2}-\d{2}$/.test(query.to || '') ? Date.parse(query.to + 'T00:00:00Z') : from;
-    const end = Math.min(now, (Number.isNaN(toRaw) ? from : toRaw) + 864e5); // inclusive end day
-    const days = Math.max(1, Math.round((end - from) / 864e5));
-    return { start: from, end, days, period: 'custom', hourly: days <= 1 };
+  const today = TZ.localDay(tz, now);
+  // custom range: from/to are local YYYY-MM-DD (inclusive)
+  const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d + 'T00:00:00Z'));
+  if (isDay(query.from)) {
+    let fromDay = query.from, toDay = isDay(query.to) ? query.to : query.from;
+    if (toDay < fromDay) toDay = fromDay;
+    const start = TZ.dayStart(tz, fromDay);
+    const end = Math.max(start + 1, Math.min(now, TZ.dayStart(tz, TZ.addDays(toDay, 1))));
+    const days = Math.max(1, Math.round((Date.parse(toDay + 'T00:00:00Z') - Date.parse(fromDay + 'T00:00:00Z')) / 864e5) + 1);
+    const lastDay = TZ.localDay(tz, end - 1) < toDay ? TZ.localDay(tz, end - 1) : toDay;
+    return { start, end, days: Math.min(days, Math.round((Date.parse(lastDay + 'T00:00:00Z') - Date.parse(fromDay + 'T00:00:00Z')) / 864e5) + 1), period: 'custom', hourly: days <= 1, tz, fromDay, toDay: lastDay };
   }
   const period = PERIODS[query.period] ? query.period : '7d';
   const days = PERIODS[period];
-  // Whole UTC days: "7d" = today + the 6 full days before it. Starting at now - 7×24h would
-  // cut the oldest day off at the current clock time and undercount it.
-  const today0 = Date.parse(new Date(now).toISOString().slice(0, 10) + 'T00:00:00Z');
-  const start = today0 - (days - 1) * 864e5;
-  return { start, end: now, days, period, hourly: period === 'today' };
+  const fromDay = TZ.addDays(today, -(days - 1));
+  return { start: TZ.dayStart(tz, fromDay), end: now, days, period, hourly: period === 'today', tz, fromDay, toDay: today };
 }
 
 // Whitelisted segmentation filters — click any breakdown row in the dashboard to drill in.
@@ -510,14 +533,15 @@ function whoDid(req) {
 
 // ── imported history helpers ──
 const firstNativeDay = db.prepare('SELECT MIN(day) d FROM events WHERE site_id = ?');
-function importedFor(siteId, start, end, filtered) {
+function importedFor(siteId, start, end, filtered, tz) {
   const exists = !!db.prepare('SELECT 1 FROM imports WHERE site_id = ? LIMIT 1').get(siteId);
   const off = { exists, on: false, filtered: exists && filtered, tot: { pageviews: 0, visitors: 0 }, days: [], top: () => [], until: null };
   if (!exists || filtered) return off;
   // imported days count only before the first day with own data
   const first = firstNativeDay.get(siteId).d;
-  const from = new Date(start).toISOString().slice(0, 10);
-  const lastDay = new Date(end - 1).toISOString().slice(0, 10);
+  // imported rows are calendar days of the source; they are matched against the site's local days
+  const from = TZ.localDay(tz, start);
+  const lastDay = TZ.localDay(tz, end - 1);
   const to = first && first <= lastDay ? new Date(Date.parse(first + 'T00:00:00Z') - 864e5).toISOString().slice(0, 10) : lastDay;
   if (to < from) return { ...off, until: first };
   const days = db.prepare("SELECT day, SUM(visitors) visitors, SUM(pageviews) pageviews FROM imported WHERE site_id = ? AND dim = '' AND day >= ? AND day <= ? GROUP BY day").all(siteId, from, to);
@@ -537,7 +561,7 @@ function statsHandler(req, res) {
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const sid = site.id;
-  const { start, end, days, period, hourly } = rangeFor(req.query);
+  const { start, end, days, period, hourly, tz, fromDay, toDay } = rangeFor(req.query, site.timezone);
   const { clauses, params, goal } = buildFilters(req.query);
   const evf = eventPlatformFilter(req.query); // platform/version also narrow event panels (revenue, search, 404)
 
@@ -551,7 +575,7 @@ function statsHandler(req, res) {
   const totals = db.prepare(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where}`).get(...args);
   // imported history counts only for days before the site's first own event (no double counting)
   // and only without segment filters (imported data is pre-aggregated per single dimension).
-  const imp = importedFor(sid, start, end, clauses.length > 0 || !!goal || !!evf);
+  const imp = importedFor(sid, start, end, clauses.length > 0 || !!goal || !!evf, tz);
   if (imp.on) { totals.pageviews += imp.tot.pageviews; totals.visitors += imp.tot.visitors; }
   const bounceRow = db.prepare(`SELECT COUNT(*) AS bounced FROM (SELECT vh, COUNT(*) c FROM events WHERE ${where} GROUP BY vh HAVING c = 1)`).get(...args);
   const bounce = totals.visitors ? Math.round((bounceRow.bounced / totals.visitors) * 100) : 0;
@@ -564,32 +588,37 @@ function statsHandler(req, res) {
   const prevArgs = args.slice(); prevArgs[1] = start - len; prevArgs[2] = start;
   if (goal) { prevArgs[prevArgs.length - 3] = start - len; prevArgs[prevArgs.length - 2] = start; }
   const prev = db.prepare(`SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE ${where}`).get(...prevArgs);
-  if (imp.on) { const pi = importedFor(sid, start - len, start, false); if (pi.on) { prev.pageviews += pi.tot.pageviews; prev.visitors += pi.tot.visitors; } }
+  if (imp.on) { const pi = importedFor(sid, start - len, start, false, tz); if (pi.on) { prev.pageviews += pi.tot.pageviews; prev.visitors += pi.tot.visitors; } }
   const pct = (cur, was) => (was ? Math.round(((cur - was) / was) * 100) : null);
 
   // time series (per hour for a single day, else per day)
   let series;
   if (hourly) {
-    const rows = db.prepare(`SELECT CAST((ts/3600000) AS INT) AS bucket, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY bucket`).all(...args);
+    // one bucket per real hour of the local day (23 or 25 on DST days), labelled with the local
+    // hour. Buckets start at local midnight, so +5:45 zones are not cut at UTC hours.
+    const dayEnd = TZ.dayStart(tz, TZ.addDays(fromDay, 1));
+    const rows = db.prepare(`SELECT CAST(((ts - ${Math.trunc(start)}) / 3600000) AS INT) AS bucket, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY bucket`).all(...args);
     const map = new Map(rows.map((r) => [r.bucket, r]));
-    const startH = Math.floor(start / 3600000);
-    series = Array.from({ length: 24 }, (_, i) => {
-      const r = map.get(startH + i);
-      return { label: String(i).padStart(2, '0'), visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 };
+    const n = Math.round((dayEnd - start) / 3600000);
+    series = Array.from({ length: n }, (_, i) => {
+      const r = map.get(i);
+      const t = start + i * 3600000;
+      const lab = new Date(t + TZ.offsetMin(tz, t) * 60000).toISOString().slice(11, 13);
+      return { label: lab, visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 };
     });
   } else {
-    const rows = db.prepare(`SELECT day, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY day`).all(...args);
-    const map = new Map(rows.map((r) => [r.day, r]));
-    if (imp.on) for (const r of imp.days) { const e = map.get(r.day) || { day: r.day, pv: 0, v: 0 }; e.pv += r.pageviews; e.v += r.visitors; map.set(r.day, e); }
+    const rows = db.prepare(`SELECT ${TZ.daySql(tz, start, end)} AS lday, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY lday`).all(...args);
+    const map = new Map(rows.map((r) => [r.lday, r]));
+    if (imp.on) for (const r of imp.days) { const e = map.get(r.day) || { lday: r.day, pv: 0, v: 0 }; e.pv += r.pageviews; e.v += r.visitors; map.set(r.day, e); }
     series = Array.from({ length: days }, (_, i) => {
-      const d = new Date(start + i * 864e5).toISOString().slice(0, 10);
+      const d = TZ.addDays(fromDay, i);
       const r = map.get(d);
       return { label: d.slice(5), day: d, visitors: r ? r.v : 0, pageviews: r ? r.pv : 0 };
     });
   }
 
   // previous year: same window shifted by 364 days (same weekdays). Null until data reaches back that far.
-  const yoyStart = start - 364 * 864e5, yoyEnd = end - 364 * 864e5;
+  const yoyStart = TZ.dayStart(tz, TZ.addDays(fromDay, -364)), yoyEnd = yoyStart + (end - start);
   const firstTs = db.prepare('SELECT MIN(ts) t FROM events WHERE site_id = ?').get(sid).t;
   let yoy = null;
   if (firstTs != null && firstTs <= yoyStart) {
@@ -725,17 +754,17 @@ function statsHandler(req, res) {
 
   res.json({
     site: { domain: site.domain, name: site.name },
-    period, range: { from: new Date(start).toISOString().slice(0, 10), to: new Date(end - 1).toISOString().slice(0, 10) },
+    period, timezone: tz, range: { from: fromDay, to: toDay },
     filters: Object.assign({}, ...Object.keys(FILTER_COLS).filter((k) => req.query[k]).map((k) => ({ [k]: req.query[k] })), goal ? { goal } : {}),
     totals: { visitors: totals.visitors, pageviews: totals.pageviews, bounce, viewsPerVisitor, duration },
     trend: { visitors: pct(totals.visitors, prev.visitors), pageviews: pct(totals.pageviews, prev.pageviews) },
     previous: { visitors: prev.visitors, pageviews: prev.pageviews },
     yoy,
-    dataSince: firstTs ? new Date(firstTs).toISOString().slice(0, 10) : null,
+    dataSince: firstTs ? TZ.localDay(tz, firstTs) : null,
     imported: imp.exists ? { included: imp.on, excludedByFilter: imp.filtered, until: imp.until } : null,
     series,
     annotations: db.prepare('SELECT id, day, text, created_by FROM annotations WHERE site_id = ? AND day >= ? AND day <= ? ORDER BY day, id')
-      .all(sid, new Date(start).toISOString().slice(0, 10), new Date(end - 1).toISOString().slice(0, 10)),
+      .all(sid, fromDay, toDay),
     pages: topBy('path', 10),
     entryPages: edge('ASC', 8),
     exitPages: edge('DESC', 8),
@@ -925,7 +954,7 @@ app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
   if (!f) return res.status(404).json({ error: 'Unknown funnel' });
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(f.site_id);
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
-  const { start, end } = rangeFor(req.query);
+  const { start, end, fromDay, toDay } = rangeFor(req.query, site.timezone);
   const steps = JSON.parse(f.steps);
   // one pass per visitor: fetch matching events sorted by time, walk the step ladder.
   const conds = steps.map((s) => (s.type === 'goal' ? 'name = ?' : "(name IS NULL AND path = ?)"));
@@ -947,7 +976,7 @@ app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
     pctOfFirst: counts[0] ? +((counts[i] / counts[0]) * 100).toFixed(1) : 0,
     dropFromPrev: i > 0 && counts[i - 1] ? +((1 - counts[i] / counts[i - 1]) * 100).toFixed(1) : 0,
   }));
-  res.json({ id: f.id, name: f.name, range: { from: new Date(start).toISOString().slice(0, 10), to: new Date(end - 1).toISOString().slice(0, 10) }, steps: out });
+  res.json({ id: f.id, name: f.name, range: { from: fromDay, to: toDay }, steps: out });
 });
 
 // ── static dashboard ─────────────────────────────────────────────────────────
@@ -959,7 +988,7 @@ app.get('/api/journeys', authOrShare, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
-  const { start, end } = rangeFor(req.query);
+  const { start, end } = rangeFor(req.query, site.timezone);
   const maxDepth = Math.min(5, Math.max(2, parseInt(req.query.depth, 10) || 4));
   const GAP = 30 * 60000;
   const rows = db.prepare('SELECT vh, ts, path FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL ORDER BY vh, ts, id').all(site.id, start, end);
