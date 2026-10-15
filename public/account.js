@@ -163,7 +163,7 @@
 
   // ── settings ──
   var ROLE_LABEL = { owner: 'Owner', admin: 'Admin', viewer: 'Viewer' };
-  var ROLE_HELP = { owner: 'everything, including the team', admin: 'sites, share links and funnels', viewer: 'read only' };
+  var ROLE_HELP = { owner: 'everything, including the team', admin: 'sites, share links and funnels (all or picked sites)', viewer: 'read only' };
   var me = null;
   function setErr(t) { $('setErr').textContent = t || ''; }
   // footer version: only after sign-in (from /api/me), links to the release tag; strict format check so
@@ -418,15 +418,15 @@
         var self = me && me.id === u.id;
         return '<div class="set-row team-row" data-uid="' + u.id + '">' +
           '<span><strong data-no-i18n>' + esc(u.username) + '</strong>' + (self ? ' <span class="muted small">(you)</span>' : '') +
-          '<br><span class="muted small">' + (u.role === 'viewer' ? siteNames(u.sites) + ' · ' : '') + (u.totp ? '2FA on' : 'no 2FA') + (u.passkeys ? ' · ' + u.passkeys + ' passkey' + (u.passkeys > 1 ? 's' : '') : '') + ' · last sign-in ' + date(u.last_login) + '</span></span>' +
+          '<br><span class="muted small">' + (u.role !== 'owner' ? siteNames(u.sites) + ' · ' : '') + (u.totp ? '2FA on' : 'no 2FA') + (u.passkeys ? ' · ' + u.passkeys + ' passkey' + (u.passkeys > 1 ? 's' : '') : '') + ' · last sign-in ' + date(u.last_login) + '</span></span>' +
           '<select data-role>' + ['owner', 'admin', 'viewer'].map(function (r) { return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>'; }).join('') + '</select>' +
-          '<span class="row-actions">' + (u.role === 'viewer' ? '<button class="btn ghost mini" data-sites>Sites</button>' : '') +
+          '<span class="row-actions">' + (u.role !== 'owner' ? '<button class="btn ghost mini" data-sites>Sites</button>' : '') +
           (!self ? '<button class="btn ghost mini" data-resetlink title="One-time link to set a new password (24 h)">Password link</button>' : '') +
           (u.totp && !self ? '<button class="btn ghost mini" data-reset2fa>Reset 2FA</button>' : '') +
           (!self ? '<button class="btn ghost danger mini" data-remove>Remove</button>' : '') + '</span></div>';
       }).join('');
       var invites = t.invites.map(function (i) {
-        return '<div class="set-row"><span>' + ico('i-user-plus') + ROLE_LABEL[i.role] + (i.role === 'viewer' ? ' · ' + esc(siteNames(i.sites)) : '') + '</span><span class="muted small">expires ' + date(i.expires) + '</span><button class="btn ghost danger mini" data-delinv="' + i.id + '">Revoke</button></div>';
+        return '<div class="set-row"><span>' + ico('i-user-plus') + ROLE_LABEL[i.role] + (i.role !== 'owner' ? ' · ' + esc(siteNames(i.sites)) : '') + '</span><span class="muted small">expires ' + date(i.expires) + '</span><button class="btn ghost danger mini" data-delinv="' + i.id + '">Revoke</button></div>';
       }).join('');
       el.innerHTML =
         '<div class="set-card"><h3>' + ico('i-users') + 'Members</h3>' + rows + '</div>' +
@@ -436,11 +436,11 @@
         '<div id="invSites">' + sitePicker('invPick', null) + '</div>' +
         '<div id="invOut"></div>' + (invites ? '<h4 class="muted small" style="margin-top:12px">Open invites</h4>' + invites : '') + '</div>';
 
-      $('invRole').onchange = function () { $('invSites').classList.toggle('hide', this.value !== 'viewer'); };
+      $('invRole').onchange = function () { $('invSites').classList.toggle('hide', this.value === 'owner'); };
       $('invCreate').onclick = function () {
         setErr('');
         var role = $('invRole').value;
-        call('POST', '/api/team/invites', { role: role, sites: role === 'viewer' ? pickedSites('invPick') : null }).then(function (r) {
+        call('POST', '/api/team/invites', { role: role, sites: role !== 'owner' ? pickedSites('invPick') : null }).then(function (r) {
           var url = location.origin + r.url;
           $('invOut').innerHTML = '<div class="snippet" id="invUrl">' + esc(url) + '</div><button class="btn ghost" id="invCopy">Copy link</button>';
           $('invCopy').onclick = function () { navigator.clipboard.writeText(url); $('invCopy').textContent = 'Copied ✓'; };

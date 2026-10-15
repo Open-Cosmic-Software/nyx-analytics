@@ -21,12 +21,12 @@ test('existing sites default to UTC after the upgrade (Tyto 5)', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taci-mig-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const DB_PATH = path.join(dir, 'a.db');
-  // the real 2.1.0 server (master) creates the DB and a site, then this server opens it
+  // the real 2.1.0 server (tag v2.1.0, pinned: master moves on with every release) creates the DB and a site, then this server opens it
   const wt = path.join(dir, 'old');
-  execFileSync('git', ['worktree', 'add', '--detach', wt, 'master'], { cwd: ROOT, stdio: 'ignore' });
+  execFileSync('git', ['worktree', 'add', '--detach', wt, 'v2.1.0'], { cwd: ROOT, stdio: 'ignore' });
   t.after(() => execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: ROOT, stdio: 'ignore' }));
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(wt, 'node_modules'));
-  assert.ok(!/timezone/.test(fs.readFileSync(path.join(wt, 'server.js'), 'utf8').match(/CREATE TABLE IF NOT EXISTS sites \([^;]*/)[0]), 'master has no timezone column');
+  assert.ok(!/timezone/.test(fs.readFileSync(path.join(wt, 'server.js'), 'utf8').match(/CREATE TABLE IF NOT EXISTS sites \([^;]*/)[0]), 'v2.1.0 has no timezone column');
   const env = { ...process.env, DB_PATH, PORT: String(46000 + Math.floor(Math.random() * 1000)), DIGEST_WEBHOOK_URL: 'off', DATA_RETENTION_DAYS: '0', INGEST_SALT: 's', SESSION_SECRET: 'x', TACILYTICS_ALERT_TICK: 'off' };
   const p0 = await boot(wt, env);
   const db0 = new Database(DB_PATH);

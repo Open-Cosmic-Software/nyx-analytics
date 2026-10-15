@@ -660,7 +660,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const b = req.body || {};
     const role = cleanRole(b.role);
     if (!role) return res.status(400).json({ error: 'Role must be owner, admin or viewer' });
-    const sites = role === 'viewer' ? cleanSites(b.sites) : null;
+    const sites = role !== 'owner' ? cleanSites(b.sites) : null; // admins and viewers can be limited to sites
     if (sites === undefined) return res.status(400).json({ error: 'sites must be a list of site ids or null' });
     if (Array.isArray(sites) && !sites.length) return res.status(400).json({ error: 'Pick at least one site' });
     const token = randToken();
@@ -682,7 +682,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const role = b.role === undefined ? u.role : cleanRole(b.role);
     if (!role) return res.status(400).json({ error: 'Role must be owner, admin or viewer' });
     if (u.role === 'owner' && role !== 'owner' && q.ownerCount.get().n <= 1) return res.status(400).json({ error: 'There must be at least one owner' });
-    let sites = role === 'viewer' ? (b.sites === undefined ? (u.sites ? JSON.parse(u.sites) : null) : cleanSites(b.sites)) : null;
+    let sites = role !== 'owner' ? (b.sites === undefined ? (u.sites ? JSON.parse(u.sites) : null) : cleanSites(b.sites)) : null;
     if (sites === undefined) return res.status(400).json({ error: 'sites must be a list of site ids or null' });
     if (Array.isArray(sites) && !sites.length) return res.status(400).json({ error: 'Pick at least one site' });
     db.prepare('UPDATE users SET role = ?, sites = ? WHERE id = ?').run(role, sites ? JSON.stringify(sites) : null, u.id);
@@ -761,7 +761,20 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     res.json({ ok: true, username: who });
   });
 
-  return { auth, requireRole, siteAllowed, principal, audit };
+  /** a site created by a site-limited account becomes part of that account's list */
+  function grantSite(req, siteId) {
+    const p = req.principal;
+    if (!p || p.sites == null || !p.user) return;
+    const u = q.userById.get(p.user.id);
+    if (!u || u.sites == null) return;
+    const list = JSON.parse(u.sites);
+    if (!list.includes(siteId)) list.push(siteId);
+    db.prepare('UPDATE users SET sites = ? WHERE id = ?').run(JSON.stringify(list), u.id);
+    p.sites = list;
+  }
+  /** limited = can only see some sites (cloud customers, viewers with a site list) */
+  const isLimited = (req) => !!(req.principal && req.principal.sites != null);
+  return { auth, requireRole, siteAllowed, principal, audit, grantSite, isLimited };
 }
 
 // ── offline admin (CLI on the server, for lock-outs) ─────────────────────────

@@ -142,7 +142,7 @@
     'For scripts, agents and the CLI (': 'Für Skripte, Agents und die CLI (',
     '). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.': '). Ein Key handelt als du, sieht nur deine Seiten und kann weder das Team noch deine Sicherheitseinstellungen ändern. Nur lesen, außer du nimmst den Haken raus.',
     'Signed in as': 'Angemeldet als',
-    'Viewer — read only': 'Viewer: nur lesen', 'Admin — sites, share links and funnels': 'Admin: Seiten, Share-Links und Funnels', 'Owner — everything, including the team': 'Owner: alles, auch das Team',
+    'Viewer — read only': 'Viewer: nur lesen', 'Admin — sites, share links and funnels (all or picked sites)': 'Admin: Seiten, Share-Links und Funnels (alle oder ausgewählte Seiten)', 'Owner — everything, including the team': 'Owner: alles, auch das Team',
     'In Plausible:': 'In Plausible:', 'Site settings → Imports & Exports → Export data': 'Website-Einstellungen → Imports & Exports → Export data',
     '. Upload the ZIP you get (or the CSV files in it).': '. Lade das ZIP hoch (oder die CSV-Dateien darin).',
     'In Google Analytics 4: open a report (e.g.': 'In Google Analytics 4: Öffne einen Bericht (z. B.', 'Pages and screens': 'Seiten und Bildschirme', 'Traffic acquisition': 'Akquisition von Zugriffen',

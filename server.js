@@ -143,6 +143,8 @@ db.exec(`
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
 // per-site time zone (Fabian): only query boundaries move, stored days stay UTC (Tyto). Old installs → 'UTC'.
 if (!db.prepare('PRAGMA table_info(sites)').all().some((c) => c.name === 'timezone')) db.exec("ALTER TABLE sites ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
+// paused sites collect nothing (hosting: trial over / subscription ended). Only an unlimited admin or owner can pause.
+if (!db.prepare('PRAGMA table_info(sites)').all().some((c) => c.name === 'paused')) db.exec('ALTER TABLE sites ADD COLUMN paused INTEGER NOT NULL DEFAULT 0');
 const getSiteByDomain = db.prepare('SELECT * FROM sites WHERE domain = ?');
 const insSite = db.prepare("INSERT OR IGNORE INTO sites (domain, name, created, timezone) VALUES (?, ?, ?, COALESCE(?, 'UTC'))");
 const allSites = db.prepare('SELECT * FROM sites ORDER BY domain');
@@ -317,7 +319,7 @@ function collect(req, res) {
   const domain = norm(b.d || b.domain);
   if (!domain) return res.status(204).end();
   const site = getSiteByDomain.get(domain);
-  if (!site) return res.status(202).end(); // unknown site → silently ignore
+  if (!site || site.paused) return res.status(202).end(); // unknown or paused site → silently ignore
   const platform = appPlatform(b);
   // apps: the HTTP client's user agent says nothing about the device, so OS/device come from the beacon.
   // A bot-looking UA is still dropped, so the bot filter cannot be bypassed by just adding `pf`.
@@ -386,7 +388,7 @@ app.get('/api/collect', collect);
 
 // ── auth: accounts, team, optional 2FA + passkeys (auth.js) ───────────────────
 const { setupAuth } = require('./auth');
-const { auth, requireRole, siteAllowed, audit } = setupAuth({
+const { auth, requireRole, siteAllowed, audit, grantSite, isLimited } = setupAuth({
   app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp,
   allSiteIds: () => db.prepare('SELECT id FROM sites').all().map((r) => r.id),
 });
@@ -423,7 +425,14 @@ const sitesCreateHandler = (req, res) => {
   const rawTz = req.body && req.body.timezone;
   const timezone = rawTz == null || rawTz === '' ? null : TZ.validTz(String(rawTz));
   if (rawTz != null && rawTz !== '' && !timezone) return res.status(400).json({ error: 'Unknown time zone' });
-  insSite.run(domain, (req.body && req.body.name) || displayName, Date.now(), timezone);
+  const existing = getSiteByDomain.get(domain);
+  if (existing) {
+    // an account limited to some sites must never get a foreign site back (or added to its list) by naming its domain
+    if (!siteAllowed(req, existing.id)) return res.status(409).json({ error: 'This domain is already registered' });
+    return res.json(existing);
+  }
+  const info = insSite.run(domain, (req.body && req.body.name) || displayName, Date.now(), timezone);
+  grantSite(req, Number(info.lastInsertRowid));
   audit(res, 'site.add', domain);
   res.json(getSiteByDomain.get(domain));
 };
@@ -435,10 +444,20 @@ app.patch('/api/sites/:id', adminOnly, (req, res) => {
   if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(id);
   if (!site) return res.status(404).json({ error: 'Unknown site' });
-  const timezone = TZ.validTz(String((req.body && req.body.timezone) || ''));
-  if (!timezone) return res.status(400).json({ error: 'Unknown time zone' });
-  db.prepare('UPDATE sites SET timezone = ? WHERE id = ?').run(timezone, id);
-  if (timezone !== site.timezone) audit(res, 'site.timezone', site.domain + ': ' + site.timezone + ' → ' + timezone);
+  const b = req.body || {};
+  if (b.paused !== undefined) {
+    // pausing is the operator's switch (hosting: trial or subscription ended), never the customer's
+    if (isLimited(req)) return res.status(403).json({ error: 'Your role does not allow this' });
+    const paused = b.paused ? 1 : 0;
+    db.prepare('UPDATE sites SET paused = ? WHERE id = ?').run(paused, id);
+    if (paused !== site.paused) audit(res, paused ? 'site.pause' : 'site.resume', site.domain);
+  }
+  if (b.timezone !== undefined || b.paused === undefined) {
+    const timezone = TZ.validTz(String(b.timezone || ''));
+    if (!timezone) return res.status(400).json({ error: 'Unknown time zone' });
+    db.prepare('UPDATE sites SET timezone = ? WHERE id = ?').run(timezone, id);
+    if (timezone !== site.timezone) audit(res, 'site.timezone', site.domain + ': ' + site.timezone + ' → ' + timezone);
+  }
   res.json(db.prepare('SELECT * FROM sites WHERE id = ?').get(id));
 });
 app.delete('/api/sites/:id', adminOnly, (req, res) => {
@@ -1093,7 +1112,7 @@ app.get('/api/alerts', auth, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
-  res.json({ fallbackWebhook: !!DIGEST_WEBHOOK_URL, alerts: db.prepare('SELECT * FROM alerts WHERE site_id = ? ORDER BY id').all(site.id).map((a) => publicAlert(a, site.domain)) });
+  res.json({ fallbackWebhook: !!DIGEST_WEBHOOK_URL && !isLimited(req), alerts: db.prepare('SELECT * FROM alerts WHERE site_id = ? ORDER BY id').all(site.id).map((a) => publicAlert(a, site.domain)) });
 });
 app.post('/api/alerts', adminOnly, async (req, res) => {
   const b = req.body || {};
@@ -1118,7 +1137,10 @@ app.post('/api/alerts', adminOnly, async (req, res) => {
     if (prob) return res.status(400).json({ error: prob });
     if (!(await webhookResolvesPublic(b.webhook, webhookLookup))) return res.status(400).json({ error: 'Webhook must point to a public address' });
     webhook = String(b.webhook);
-  } else if (!DIGEST_WEBHOOK_URL) return res.status(400).json({ error: 'Add a webhook URL (no default DIGEST_WEBHOOK_URL is set)' });
+  } else if (!DIGEST_WEBHOOK_URL || isLimited(req)) {
+    // the operator's webhook is for the operator: an account limited to some sites must bring its own
+    return res.status(400).json({ error: 'Add a webhook URL' + (DIGEST_WEBHOOK_URL ? '' : ' (no default DIGEST_WEBHOOK_URL is set)') });
+  }
   if (db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n >= 20) return res.status(400).json({ error: 'At most 20 alerts per site' });
   const info = db.prepare('INSERT INTO alerts (site_id, kind, goal, threshold, window_hours, webhook, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(site.id, b.kind, goal, threshold, windowHours, webhook, Date.now());
