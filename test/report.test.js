@@ -65,12 +65,16 @@ async function call(method, p, { token, body, key } = {}) {
 }
 function events(siteId, list) {
   const d = new Database(DB_PATH);
-  const ins = d.prepare('INSERT INTO events (site_id, ts, day, path, source, name, vh) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  d.transaction(() => { for (const e of list) ins.run(siteId, e.ts, new Date(e.ts).toISOString().slice(0, 10), e.path || '/', e.source || null, e.name || null, e.vh); })();
+  const ins = d.prepare('INSERT INTO events (site_id, ts, day, path, source, name, vh, country, device, props) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  d.transaction(() => { for (const e of list) ins.run(siteId, e.ts, new Date(e.ts).toISOString().slice(0, 10), e.path || '/', e.source || null, e.name || null, e.vh, e.country || null, e.device || null, e.props || null); })();
   d.close();
 }
 // quoted-printable soft breaks + =XX → plain text, enough for assertions
-const qp = (s) => s.replace(/=\n/g, '').replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+// (bytes → UTF-8, so € / Ö / flags survive). Base64 parts are decoded too.
+const qp = (s) => {
+  const out = s.replace(/=\n/g, '').replace(/(?:=[0-9A-F]{2})+/g, (m) => Buffer.from(m.split('=').slice(1).map((h) => parseInt(h, 16))).toString('utf8'));
+  return out.replace(/Content-Transfer-Encoding: base64\n\n([A-Za-z0-9+/=\n]+)/g, (_, b) => Buffer.from(b.replace(/\n/g, ''), 'base64').toString('utf8'));
+};
 
 test('weekly report', async (t) => {
   await new Promise((r) => smtp.listen(SMTP_PORT, '127.0.0.1', r));
@@ -86,10 +90,14 @@ test('weekly report', async (t) => {
   const monday = Date.UTC(2026, 9, 19, 6, 5); // Mon 19 Oct 2026, 06:05 UTC
   const day = 864e5;
   // this week: a.test 30 visitors, b.test 5; week before: a.test 20
-  events(a.id, Array.from({ length: 30 }, (_, i) => ({ ts: monday - 3 * day, vh: 'a' + i, path: i < 20 ? '/pasta' : '/', source: i < 10 ? 'google.com' : null })));
+  events(a.id, Array.from({ length: 30 }, (_, i) => ({ ts: monday - 3 * day, vh: 'a' + i, path: i < 20 ? '/pasta' : '/', source: i < 10 ? 'google.com' : null, country: i < 24 ? 'AT' : 'CH', device: i < 18 ? 'Mobile' : 'Desktop' })));
   events(a.id, Array.from({ length: 20 }, (_, i) => ({ ts: monday - 10 * day, vh: 'p' + i })));
-  events(a.id, [{ ts: monday - 2 * day, vh: 'a1', name: 'Purchase' }, { ts: monday - 2 * day, vh: 'a2', name: 'Purchase' }]);
+  events(a.id, [{ ts: monday - 2 * day, vh: 'a1', name: 'Purchase', props: '{"value":19.9}' }, { ts: monday - 2 * day, vh: 'a2', name: 'Purchase', props: '{"value":30.1}' }, { ts: monday - 2 * day, vh: 'a3', name: 'Signup' }]);
+  { const d = new Database(DB_PATH); d.prepare('INSERT INTO annotations (site_id, day, text, created_by, created) VALUES (?, ?, ?, ?, ?)').run(a.id, new Date(monday - 3 * day).toISOString().slice(0, 10), 'Newsletter <b>sent</b>', 'fabi', Date.now()); d.prepare('INSERT INTO annotations (site_id, day, text, created_by, created) VALUES (?, ?, ?, ?, ?)').run(a.id, new Date(monday - 20 * day).toISOString().slice(0, 10), 'old note', 'fabi', Date.now()); d.close(); }
   events(b.id, Array.from({ length: 5 }, (_, i) => ({ ts: monday - 2 * day, vh: 'b' + i })));
+  // own visits (internal_vh) must not show up in the report
+  events(a.id, [{ ts: monday - 3 * day, vh: 'me', path: '/admin-only' }]);
+  { const d = new Database(DB_PATH); d.prepare('INSERT INTO internal_vh (site_id, vh, day) VALUES (?, ?, ?)').run(a.id, 'me', new Date(monday - 3 * day).toISOString().slice(0, 10)); d.close(); }
 
   await t.test('settings: off by default, mail configured', async () => {
     const r = (await call('GET', '/api/me/report', { token: owner })).j;
@@ -121,10 +129,39 @@ test('weekly report', async (t) => {
     assert.match(toFabi, /Visitors\s+30 \(\+50 %\)/);
     assert.match(toFabi, /\/pasta \(20\)/);
     assert.match(toFabi, /google\.com \(10\)/);
-    assert.match(toFabi, /Purchase \(2\)/);
+    assert.match(toFabi, /Signup \(1\)/);
+    assert.ok(!/admin-only/.test(toFabi), 'an internal visit was counted');
+    assert.match(toFabi, /Orders 2/);
+    assert.match(toFabi, /€50\.00/);
+    assert.match(toFabi, /Austria \(24\)/);
+    assert.match(toFabi, /Subject: 2 sites: 35 visitors last week \(\+75 %\)/);
     assert.match(toFabi, /https:\/\/analytics\.example\.com\/\?site=a\.test/);
     assert.match(toFabi, /b\.test/);
     assert.match(toFabi, /From: Tacilytics <reports@example\.com>/);
+  });
+  await t.test('HTML part: chart, highlights, notes of this week only, escaped, devices', () => {
+    const html = toFabi.slice(toFabi.indexOf('<!doctype html>'));
+    assert.match(html, /Day by day/);
+    assert.match(html, /Best day:/);
+    assert.match(html, /New source:<\/b> google\.com/);
+    assert.match(html, /First time:<\/b> Signup/);
+    assert.match(html, /Newsletter &lt;b&gt;sent&lt;\/b&gt;/, 'note text must be escaped');
+    assert.ok(!/old note/.test(html), 'a note from another week leaked in');
+    assert.match(html, /Mobile <b>60 %<\/b>/);
+    assert.match(html, /🇦🇹 Austria/);
+    assert.match(html, /Hi fabi,/);
+    assert.ok(!/<style/i.test(html), 'mail clients drop <style>: inline only');
+  });
+  await t.test('report.js directly: German country names and numbers', () => {
+    const Database2 = require('better-sqlite3');
+    const d = new Database2(DB_PATH, { readonly: true });
+    const { createReport } = require('../report');
+    const r = createReport(d).build({ username: 'fabi' }, [{ id: a.id, domain: 'a.test' }], monday, { lang: 'de', publicUrl: 'https://x.test' });
+    d.close();
+    assert.match(r.text, /Österreich \(24\)/);
+    assert.match(r.text, /Umsatz 50,00\s€/);
+    assert.match(r.subject, /^a\.test: 30 Besucher letzte Woche \(\+50 %\)$/);
+    assert.match(r.html, /🇦🇹 Österreich/);
   });
   await t.test('a viewer only gets the sites they can see', () => {
     assert.match(toVera, /a\.test/);
@@ -138,12 +175,28 @@ test('weekly report', async (t) => {
     const r = (await call('POST', '/api/_test/report-tick', { key: KEY, body: { now: monday + 7 * day } })).j;
     assert.deepStrictEqual(r.map((x) => x.user), ['fabi']);
   });
+  await t.test('German report when chosen; unknown language rejected', async () => {
+    assert.strictEqual((await call('POST', '/api/me/report', { token: owner, body: { email: 'fabi@example.com', weekly: true, lang: 'xx' } })).status, 400);
+    assert.strictEqual((await call('POST', '/api/me/report', { token: owner, body: { email: 'fabi@example.com', weekly: true, lang: 'de' } })).status, 200);
+    assert.strictEqual((await call('GET', '/api/me/report', { token: owner })).j.lang, 'de');
+    mails.length = 0;
+    assert.strictEqual((await call('POST', '/api/me/report/send', { token: owner })).status, 200);
+    await sleep(200);
+    const de = qp(mails[0].data);
+    assert.match(de, /Besucher/);
+    assert.match(de, /Länder: /); // "send now" uses the real date → other test week
+    assert.match(de, /Wochenbericht/);
+    assert.match(de, /Hallo fabi/);
+    // saving without lang keeps the chosen language
+    await call('POST', '/api/me/report', { token: owner, body: { email: 'fabi@example.com', weekly: true } });
+    assert.strictEqual((await call('GET', '/api/me/report', { token: owner })).j.lang, 'de');
+  });
   await t.test('"send now" works and is rate-limited', async () => {
     mails.length = 0;
     assert.strictEqual((await call('POST', '/api/me/report/send', { token: owner })).status, 200);
     await sleep(200);
     assert.strictEqual(mails.length, 1);
-    await call('POST', '/api/me/report/send', { token: owner }); await call('POST', '/api/me/report/send', { token: owner });
+    await call('POST', '/api/me/report/send', { token: owner });
     assert.strictEqual((await call('POST', '/api/me/report/send', { token: owner })).status, 429);
   });
 });

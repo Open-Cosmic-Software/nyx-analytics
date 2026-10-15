@@ -248,7 +248,7 @@
       }).join('') +
       '</div>' +
       '<div class="set-card"><h3>' + ico('i-calendar') + 'Weekly report <span class="pill">e-mail</span></h3>' +
-      '<p class="muted">Every Monday morning: visitors, pageviews, top pages, sources and goals of last week for your sites, compared with the week before.</p>' +
+      '<p class="muted">Every Monday morning, for each of your sites: key figures, a day-by-day chart, highlights, top pages, sources, countries, devices, goals, shop numbers and your notes — compared with the week before.</p>' +
       '<div id="repBox"><p class="muted small">Loading…</p></div></div>' +
       '<div class="set-card"><h3>' + ico('i-code') + 'API keys</h3>' +
       '<p class="muted">For scripts, agents and the CLI (<code>TACILYTICS_API_KEY</code>). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.</p>' +
@@ -297,15 +297,18 @@
       if (!r.configured) { $('repBox').innerHTML = '<p class="muted small">E-mail is not set up on this server yet (SMTP_URL and REPORT_FROM in .env).</p>'; return; }
       $('repBox').innerHTML = '<div class="set-inline"><input id="repMail" type="email" placeholder="you@example.com" value="' + esc(r.email || '') + '">' +
         '<label class="small muted" style="display:inline-flex;gap:6px;align-items:center;flex:0 0 auto"><input type="checkbox" id="repOn"' + (r.weekly ? ' checked' : '') + ' style="width:auto;margin:0"> every Monday</label>' +
+        '<select id="repLang" style="flex:0 0 auto;width:auto" title="Language of the e-mail"><option value="en">English</option><option value="de">Deutsch</option></select>' +
         '<button class="btn ghost" id="repSave">Save</button><button class="btn ghost" id="repNow">Send one now</button></div>' +
         (r.last ? '<p class="muted small" style="margin:6px 0 0">Last sent ' + date(r.last) + '</p>' : '');
+      $('repLang').value = r.lang || ((window.TaciLang && window.TaciLang.current) || 'en');
+      $('repLang').setAttribute('data-no-i18n', '');
       $('repSave').onclick = function () {
         setErr('');
-        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked }).then(function () { $('repSave').textContent = 'Saved ✓'; }).catch(function (e) { setErr(e.message); });
+        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked, lang: $('repLang').value }).then(function () { $('repSave').textContent = 'Saved ✓'; }).catch(function (e) { setErr(e.message); });
       };
       $('repNow').onclick = function () {
         setErr(''); $('repNow').textContent = 'Sending…';
-        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked })
+        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked, lang: $('repLang').value })
           .then(function () { return call('POST', '/api/me/report/send'); })
           .then(function () { $('repNow').textContent = 'Sent ✓'; })
           .catch(function (e) { $('repNow').textContent = 'Send one now'; setErr(e.message); });

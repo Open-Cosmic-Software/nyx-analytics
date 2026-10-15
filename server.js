@@ -1127,7 +1127,7 @@ const SMTP_URL = process.env.SMTP_URL || '';
 const REPORT_FROM = process.env.REPORT_FROM || '';
 const REPORT_HOUR_UTC = Math.min(23, Math.max(0, parseInt(process.env.REPORT_HOUR_UTC, 10) || 6));
 const PUBLIC_URL = (process.env.TACILYTICS_ORIGIN || '').replace(/\/$/, '');
-for (const col of ['report_email TEXT', 'report_weekly INTEGER NOT NULL DEFAULT 0', 'report_last INTEGER']) {
+for (const col of ['report_email TEXT', 'report_weekly INTEGER NOT NULL DEFAULT 0', 'report_last INTEGER', 'report_lang TEXT']) {
   const name = col.split(' ')[0];
   if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === name)) db.exec(`ALTER TABLE users ADD COLUMN ${col}`);
 }
@@ -1138,64 +1138,11 @@ function getMailer() {
   return mailer;
 }
 const validEmail = (e) => /^[^\s@<>",;]{1,64}@[^\s@<>",;]{1,190}\.[A-Za-z]{2,}$/.test(e);
-function weekNumbers(siteId, now) {
-  const end = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate()); // today 00:00 UTC
-  const q = db.prepare('SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL');
-  const cur = q.get(siteId, end - 7 * 864e5, end), prev = q.get(siteId, end - 14 * 864e5, end - 7 * 864e5);
-  const top = db.prepare('SELECT path, COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL GROUP BY path ORDER BY c DESC LIMIT 3').all(siteId, end - 7 * 864e5, end);
-  const src = db.prepare("SELECT source, COUNT(DISTINCT vh) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL AND source IS NOT NULL AND source <> '' GROUP BY source ORDER BY c DESC LIMIT 3").all(siteId, end - 7 * 864e5, end);
-  const goals = db.prepare('SELECT name, COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NOT NULL GROUP BY name ORDER BY c DESC LIMIT 3').all(siteId, end - 7 * 864e5, end);
-  return { from: new Date(end - 7 * 864e5).toISOString().slice(0, 10), to: new Date(end - 864e5).toISOString().slice(0, 10), cur, prev, top, src, goals };
-}
-// same readable names as the dashboard (public/app.js SOURCE_NAMES)
-const REPORT_SOURCE_NAMES = {
-  'com.google.android.googlequicksearchbox': 'Google App (Android)', 'com.google.android.gm': 'Gmail App',
-  'fb': 'Facebook', 'm.facebook.com': 'Facebook (mobile)', 'l.facebook.com': 'Facebook', 'lm.facebook.com': 'Facebook',
-  'ig': 'Instagram', 'l.instagram.com': 'Instagram', 'homescreen': 'Homescreen (app shortcut)',
-  'android-app://com.google.android.googlequicksearchbox': 'Google App (Android)', 't.co': 'X / Twitter',
-};
-const srcName = (x) => REPORT_SOURCE_NAMES[x] || x;
-const shortPath = (p) => (p.length > 48 ? p.slice(0, 45) + '…' : p);
-const pctTxt = (a, b) => (!b ? (a ? 'new' : '±0 %') : (a >= b ? '+' : '−') + Math.abs(Math.round(((a - b) / b) * 100)) + ' %');
-const htmlEsc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const { createReport, REPORT_LANGS } = require('./report');
+const reporter = createReport(db);
 function buildReport(user, now) {
   const sites = allSites.all().filter((st) => !user.sites || JSON.parse(user.sites).includes(st.id));
-  const blocks = sites.map((st) => ({ st, n: weekNumbers(st.id, now) })).filter((b) => b.n.cur.pv || b.n.prev.pv);
-  if (!blocks.length) return null;
-  const range = `${blocks[0].n.from} – ${blocks[0].n.to}`;
-  const text = [`Tacilytics weekly report, ${range}`, ''].concat(blocks.map(({ st, n }) => [
-    `${st.domain}`,
-    `  Visitors   ${n.cur.v} (${pctTxt(n.cur.v, n.prev.v)})`,
-    `  Pageviews  ${n.cur.pv} (${pctTxt(n.cur.pv, n.prev.pv)})`,
-    n.top.length ? '  Top pages  ' + n.top.map((x) => `${shortPath(x.path)} (${x.c})`).join(', ') : '',
-    n.src.length ? '  Sources    ' + n.src.map((x) => `${srcName(x.source)} (${x.c})`).join(', ') : '',
-    n.goals.length ? '  Goals      ' + n.goals.map((x) => `${x.name} (${x.c})`).join(', ') : '',
-    PUBLIC_URL ? `  ${PUBLIC_URL}/?site=${encodeURIComponent(st.domain)}` : '',
-    '',
-  ].filter(Boolean).join('\n'))).join('\n') + '\nTurn this off: Settings → Security → Weekly report.\n';
-  const card = ({ st, n }) => {
-    const up = n.cur.v >= n.prev.v;
-    return `<tr><td style="padding:18px 20px;border:1px solid #1d2b2f;border-radius:12px;background:#0b1a1d">
-      <div style="font:600 16px system-ui,sans-serif;color:#e7f3f2;margin-bottom:10px">${htmlEsc(st.domain)}</div>
-      <table role="presentation" width="100%"><tr>
-        <td style="font:13px system-ui,sans-serif;color:#a3bcbf">Visitors<br><span style="font:600 22px system-ui,sans-serif;color:#e7f3f2">${n.cur.v}</span>
-          <span style="font:600 12px system-ui,sans-serif;color:${up ? '#2dd4bf' : '#ff7a5c'}"> ${pctTxt(n.cur.v, n.prev.v)}</span></td>
-        <td style="font:13px system-ui,sans-serif;color:#a3bcbf">Pageviews<br><span style="font:600 22px system-ui,sans-serif;color:#e7f3f2">${n.cur.pv}</span>
-          <span style="font:12px system-ui,sans-serif;color:#a3bcbf"> ${pctTxt(n.cur.pv, n.prev.pv)}</span></td></tr></table>
-      ${n.top.length ? `<div style="font:13px system-ui,sans-serif;color:#a3bcbf;margin-top:10px">Top pages: <span style="color:#cfe3e1">${n.top.map((x) => htmlEsc(shortPath(x.path)) + ' (' + x.c + ')').join(', ')}</span></div>` : ''}
-      ${n.src.length ? `<div style="font:13px system-ui,sans-serif;color:#a3bcbf;margin-top:4px">Sources: <span style="color:#cfe3e1">${n.src.map((x) => htmlEsc(srcName(x.source)) + ' (' + x.c + ')').join(', ')}</span></div>` : ''}
-      ${n.goals.length ? `<div style="font:13px system-ui,sans-serif;color:#a3bcbf;margin-top:4px">Goals: <span style="color:#cfe3e1">${n.goals.map((x) => htmlEsc(x.name) + ' (' + x.c + ')').join(', ')}</span></div>` : ''}
-      ${PUBLIC_URL ? `<div style="margin-top:12px"><a href="${htmlEsc(PUBLIC_URL)}/?site=${encodeURIComponent(st.domain)}" style="font:600 13px system-ui,sans-serif;color:#2dd4bf;text-decoration:none">Open dashboard →</a></div>` : ''}
-    </td></tr><tr><td style="height:12px"></td></tr>`;
-  };
-  const html = `<!doctype html><html><body style="margin:0;background:#071114;padding:24px 12px">
-    <table role="presentation" width="100%" style="max-width:560px;margin:0 auto">
-      <tr><td style="font:600 20px system-ui,sans-serif;color:#e7f3f2;padding:0 4px 4px">Tacilytics<span style="color:#ff7a5c">.</span></td></tr>
-      <tr><td style="font:13px system-ui,sans-serif;color:#a3bcbf;padding:0 4px 18px">Weekly report · ${htmlEsc(range)} · compared with the week before</td></tr>
-      ${blocks.map(card).join('')}
-      <tr><td style="font:12px system-ui,sans-serif;color:#86a0a3;padding:8px 4px">Cookieless analytics — we count, we don't tell. Turn this off under Settings → Security → Weekly report.</td></tr>
-    </table></body></html>`;
-  return { subject: `Tacilytics · ${range} · ${blocks.map((b) => b.st.domain).join(', ')}`.slice(0, 180), text, html };
+  return reporter.build(user, sites, now, { publicUrl: PUBLIC_URL, lang: REPORT_LANGS.includes(user.report_lang) ? user.report_lang : 'en' });
 }
 async function sendReport(user, now = Date.now()) {
   const m = getMailer();
@@ -1220,8 +1167,8 @@ if (process.env.TACILYTICS_ALERT_TICK !== 'off') setInterval(() => { reportTick(
 
 app.get('/api/me/report', auth, (req, res) => {
   if (!req.principal.user || req.principal.kind !== 'user') return res.status(400).json({ error: 'Sign in with an account' });
-  const u = db.prepare('SELECT report_email, report_weekly, report_last FROM users WHERE id = ?').get(req.principal.user.id);
-  res.json({ configured: !!getMailer(), email: u.report_email, weekly: !!u.report_weekly, last: u.report_last });
+  const u = db.prepare('SELECT report_email, report_weekly, report_last, report_lang FROM users WHERE id = ?').get(req.principal.user.id);
+  res.json({ configured: !!getMailer(), email: u.report_email, weekly: !!u.report_weekly, last: u.report_last, lang: u.report_lang || null });
 });
 app.post('/api/me/report', auth, (req, res) => {
   if (!req.principal.user || req.principal.kind !== 'user') return res.status(400).json({ error: 'Sign in with an account' });
@@ -1229,7 +1176,8 @@ app.post('/api/me/report', auth, (req, res) => {
   const email = String(b.email || '').trim();
   if (b.weekly && !validEmail(email)) return res.status(400).json({ error: 'Enter a valid e-mail address' });
   if (email && !validEmail(email)) return res.status(400).json({ error: 'Enter a valid e-mail address' });
-  db.prepare('UPDATE users SET report_email = ?, report_weekly = ? WHERE id = ?').run(email || null, b.weekly ? 1 : 0, req.principal.user.id);
+  if (b.lang != null && !REPORT_LANGS.includes(b.lang)) return res.status(400).json({ error: 'Unknown language' });
+  db.prepare('UPDATE users SET report_email = ?, report_weekly = ?, report_lang = COALESCE(?, report_lang) WHERE id = ?').run(email || null, b.weekly ? 1 : 0, b.lang || null, req.principal.user.id);
   audit(res, b.weekly ? 'me.report.on' : 'me.report.off');
   res.json({ ok: true });
 });

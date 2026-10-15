@@ -51,6 +51,7 @@
     "day-salt.js",
     "auth.js",
     "importers.js",
+    "report.js",
     "tz-country.js",
     "public/",
     "sdk/flutter/",
