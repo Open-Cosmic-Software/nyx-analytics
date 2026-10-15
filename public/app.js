@@ -148,7 +148,7 @@
     return {
       s1: 'Paste this once into the <code>&lt;head&gt;</code> of your site:',
       c1: snippetFor(domain), s2: '', c2: '',
-      hint: 'Track goals &amp; properties from your code:<br><code>tacilytics(\'Signup\')</code> · <code>tacilytics(\'Signup\', { plan: \'pro\' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code>data-honor-dnt</code> · <code>data-track-outbound</code></span>'
+      hint: 'Track goals &amp; properties from your code:<br><code>tacilytics(\'Signup\')</code> · <code>tacilytics(\'Signup\', { plan: \'pro\' })</code><br><span style="opacity:.7">Privacy flags on the tag: <code>data-honor-dnt</code> · <code>data-track-outbound</code> · <code>data-track-downloads</code></span>'
     };
   }
   function renderSnippet() {

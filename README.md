@@ -111,6 +111,7 @@ Opt-in flags on the `<script>` tag:
 <script defer data-domain="example.com"
         data-honor-dnt          <!-- skip tracking if DNT / Global Privacy Control is on -->
         data-track-outbound     <!-- auto-record clicks to other domains as events -->
+        data-track-downloads    <!-- auto-record file downloads (pdf, zip, docx …) as "File Download"; or ="pdf,epub" -->
         src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
