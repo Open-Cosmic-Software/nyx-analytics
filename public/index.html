@@ -33,6 +33,20 @@
   </div>
 </div>
 
+<!-- Reset: new password from a one-time link -->
+<div id="reset" class="modal-overlay hide">
+  <div class="modal">
+    <img class="logo" src="/assets/tacilytics-mark.svg" alt="">
+    <h2>New password</h2>
+    <p id="resetHint">Choose a new password.</p>
+    <div id="resetErr" class="err" role="alert"></div>
+    <div id="resetForm">
+      <input id="resetPw" type="password" placeholder="New password (at least 10 characters)" autocomplete="new-password">
+      <button class="btn" id="resetBtn">Save password</button>
+    </div>
+  </div>
+</div>
+
 <!-- Invite: create an account from an invite link -->
 <div id="invite" class="modal-overlay hide">
   <div class="modal">

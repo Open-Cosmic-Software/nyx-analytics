@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const ROLES = { viewer: 1, admin: 2, owner: 3 };
 const SESSION_DAYS = 30;
 const INVITE_DAYS = 7;
+const RESET_HOURS = 24;
 const MIN_PW = 10;
 
 // ── small crypto helpers ───────────────────────────────────────────────────
@@ -137,6 +138,14 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       user_id INTEGER,            -- NULL = legacy WEB_PASSWORD session
       created INTEGER NOT NULL,
       expires INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_by INTEGER,
+      created INTEGER NOT NULL,
+      expires INTEGER NOT NULL,
+      used_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS invites (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -570,6 +579,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (u.role === 'owner' && q.ownerCount.get().n <= 1) return res.status(400).json({ error: 'There must be at least one owner' });
     db.transaction(() => {
       db.prepare('DELETE FROM passkeys WHERE user_id = ?').run(u.id);
+      db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(u.id);
       q.sessDelUser.run(u.id);
       db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
     })();
@@ -582,6 +592,51 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     db.prepare('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(u.id);
     q.sessDelUser.run(u.id);
     res.json({ ok: true });
+  });
+
+  // owner creates a one-time password-reset link for a teammate (24 h). Only the password changes:
+  // 2FA stays on (a reset link must not be a way around it) and all their sessions end.
+  app.post('/api/team/users/:id/reset-link', ownerOnly, (req, res) => {
+    const u = q.userById.get(Number(req.params.id));
+    if (!u) return res.status(404).json({ error: 'Unknown user' });
+    const token = randToken();
+    const expires = Date.now() + RESET_HOURS * 3600e3;
+    db.transaction(() => {
+      db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(u.id); // only the newest link works
+      db.prepare('INSERT INTO password_resets (token_hash, user_id, created_by, created, expires) VALUES (?, ?, ?, ?, ?)')
+        .run(sha256(token), u.id, req.principal.user ? req.principal.user.id : null, Date.now(), expires);
+    })();
+    res.json({ url: '/reset/' + token, username: u.username, expires });
+  });
+  function resetByToken(token) {
+    const r = db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(sha256(String(token || '')));
+    if (!r || r.used_at || r.expires < Date.now()) return null;
+    return r;
+  }
+  app.get('/api/reset/:token', (req, res) => {
+    if (rateLimited('inv:' + clientIp(req), 30, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
+    const r = resetByToken(req.params.token);
+    const u = r && q.userById.get(r.user_id);
+    if (!u) return res.status(404).json({ error: 'This reset link is invalid, used or expired' });
+    res.json({ username: u.username, totp: !!u.totp_secret, expires: r.expires });
+  });
+  app.post('/api/reset/:token', async (req, res) => {
+    if (rateLimited('inv:' + clientIp(req), 30, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
+    const pw = String((req.body || {}).password || '');
+    if (pw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
+    if (!resetByToken(req.params.token)) return res.status(404).json({ error: 'This reset link is invalid, used or expired' });
+    const pwHash = await hashPassword(pw); // async scrypt, outside the (synchronous) transaction
+    const uid = db.transaction(() => {
+      const r = resetByToken(req.params.token); // checked again: used/expired while hashing?
+      if (!r || !q.userById.get(r.user_id)) return null;
+      db.prepare('UPDATE password_resets SET used_at = ? WHERE token_hash = ?').run(Date.now(), r.token_hash);
+      db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(pwHash, r.user_id);
+      q.sessDelUser.run(r.user_id);
+      return r.user_id;
+    })();
+    if (!uid) return res.status(404).json({ error: 'This reset link is invalid, used or expired' });
+    // no session here: the person signs in normally (with 2FA, if they have it)
+    res.json({ ok: true, username: q.userById.get(uid).username });
   });
 
   return { auth, requireRole, siteAllowed, principal };

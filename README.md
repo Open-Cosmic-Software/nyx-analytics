@@ -230,6 +230,8 @@ Everyone can turn on, **optionally**:
 - **Passkeys** (Face ID, Touch ID, Windows Hello, security keys). A passkey replaces password *and* code and cannot be phished.
 - **One-time codes (TOTP)** from any authenticator app, with 10 single-use **recovery codes**. Codes cannot be reused.
 
+**Forgot the password?** An owner clicks **Password link** next to the person in Settings → Team: a one-time link (24 h) to set a new one. Their 2FA stays on and all their sessions end.
+
 **Locked out?** On the server: `tacilytics users` lists accounts, `tacilytics reset-login <username>` prints a new password, turns 2FA off and ends that person's sessions. An owner can also reset a teammate's 2FA in Settings → Team.
 
 The API key (`API_KEY`, Bearer) keeps owner rights for agents and the CLI.

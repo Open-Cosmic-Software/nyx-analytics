@@ -126,6 +126,28 @@
     $('invPw').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
   }
 
+  // ── password reset page ──
+  function showReset(token) {
+    $('app').classList.add('hide'); $('reset').classList.remove('hide');
+    fetch('/api/reset/' + token).then(function (r) { return r.json(); }).then(function (r) {
+      if (r.error) { $('resetHint').textContent = r.error; $('resetForm').classList.add('hide'); return; }
+      $('resetHint').textContent = 'Choose a new password for ' + r.username + '.' + (r.totp ? ' Your two-factor code stays on.' : '');
+      $('resetPw').focus();
+    });
+    var go = function () {
+      $('resetErr').textContent = '';
+      post('/api/reset/' + token, { password: $('resetPw').value }).then(function (r) {
+        if (!r.ok) { $('resetErr').textContent = r.j.error || 'Could not save the password'; return; }
+        history.replaceState(null, '', '/');
+        $('reset').classList.add('hide');
+        $('login').classList.remove('hide'); prepareLogin();
+        setTimeout(function () { $('user').value = r.j.username; $('pw').focus(); $('loginHint').textContent = 'Password saved. Sign in with your new password.'; }, 300);
+      });
+    };
+    $('resetBtn').onclick = go;
+    $('resetPw').addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+  }
+
   // ── settings ──
   var ROLE_LABEL = { owner: 'Owner', admin: 'Admin', viewer: 'Viewer' };
   var ROLE_HELP = { owner: 'everything, including the team', admin: 'sites, share links and funnels', viewer: 'read only' };
@@ -199,6 +221,7 @@
       '</div>' +
       '<div class="set-card"><h3>' + ico('i-eye') + 'Don\u2019t count my own visits</h3>' +
       '<p class="muted">Open your site once with one of these links, in every browser and on every phone you use. That browser is then ignored on that site (stored in the browser, nothing on the server). The second link undoes it.</p>' +
+      ((T().sites() || []).length ? '' : '<p class="muted small">Add a site first, then the links appear here. Or open any of your pages with <code>?tacilytics=off</code> at the end.</p>') +
       (T().sites() || []).map(function (st) {
         var d = 'https://' + st.domain + '/';
         return '<div class="set-row"><span>' + esc(st.domain) + '</span>' +
@@ -303,6 +326,7 @@
           '<br><span class="muted small">' + (u.role === 'viewer' ? siteNames(u.sites) + ' · ' : '') + (u.totp ? '2FA on' : 'no 2FA') + (u.passkeys ? ' · ' + u.passkeys + ' passkey' + (u.passkeys > 1 ? 's' : '') : '') + ' · last sign-in ' + date(u.last_login) + '</span></span>' +
           '<select data-role>' + ['owner', 'admin', 'viewer'].map(function (r) { return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>'; }).join('') + '</select>' +
           '<span class="row-actions">' + (u.role === 'viewer' ? '<button class="btn ghost mini" data-sites>Sites</button>' : '') +
+          (!self ? '<button class="btn ghost mini" data-resetlink title="One-time link to set a new password (24 h)">Password link</button>' : '') +
           (u.totp && !self ? '<button class="btn ghost mini" data-reset2fa>Reset 2FA</button>' : '') +
           (!self ? '<button class="btn ghost danger mini" data-remove>Remove</button>' : '') + '</span></div>';
       }).join('');
@@ -338,6 +362,18 @@
         };
         var rm = row.querySelector('[data-remove]');
         if (rm) rm.onclick = function () { if (confirm('Remove this member? They are signed out immediately.')) call('DELETE', '/api/team/users/' + uid).then(renderTeam).catch(function (e) { setErr(e.message); }); };
+        var rl = row.querySelector('[data-resetlink]');
+        if (rl) rl.onclick = function () {
+          setErr('');
+          call('POST', '/api/team/users/' + uid + '/reset-link').then(function (r) {
+            var url = location.origin + r.url;
+            var old = row.nextElementSibling; if (old && old.classList.contains('site-edit')) old.remove();
+            var box = document.createElement('div'); box.className = 'site-edit';
+            box.innerHTML = '<p class="muted small" style="margin:0 0 6px">Send this to ' + esc(r.username) + '. It works once, for 24 hours. Their 2FA stays on.</p><div class="snippet">' + esc(url) + '</div><button class="btn ghost mini" data-copy>Copy link</button>';
+            row.after(box);
+            box.querySelector('[data-copy]').onclick = function () { navigator.clipboard.writeText(url); this.textContent = 'Copied ✓'; };
+          }).catch(function (e) { setErr(e.message); });
+        };
         var r2 = row.querySelector('[data-reset2fa]');
         if (r2) r2.onclick = function () { if (confirm('Turn off 2FA for this member? Use this when they lost their phone.')) call('POST', '/api/team/users/' + uid + '/reset-2fa').then(renderTeam).catch(function (e) { setErr(e.message); }); };
         var st = row.querySelector('[data-sites]');
@@ -355,5 +391,5 @@
     }).catch(function (e) { setErr(e.message); });
   }
 
-  window.TaciAccount = { prepareLogin: prepareLogin, showInvite: showInvite, afterBoot: afterBoot };
+  window.TaciAccount = { prepareLogin: prepareLogin, showInvite: showInvite, showReset: showReset, afterBoot: afterBoot };
 })();

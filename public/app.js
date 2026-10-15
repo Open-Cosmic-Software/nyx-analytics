@@ -781,5 +781,6 @@
   var INVITE = (location.pathname.match(/^\/invite\/([a-f0-9]{32,64})$/) || [])[1] || '';
   if (SHARE) bootShare();
   else if (INVITE) { $('login').classList.add('hide'); window.TaciAccount.showInvite(INVITE); }
+  else if (/^\/reset\/[a-f0-9]{32,64}$/.test(location.pathname)) { $('login').classList.add('hide'); window.TaciAccount.showReset(location.pathname.split('/').pop()); }
   else if (TOKEN) boot(); else showLogin();
 })();

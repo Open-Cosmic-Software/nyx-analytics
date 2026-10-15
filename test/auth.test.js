@@ -98,7 +98,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let proc = null;
 async function start() {
   proc = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env: ENV, stdio: ['ignore', 'ignore', 'pipe'] });
-  let err = ''; proc.stderr.on('data', (d) => (err += d));
+  let err = ''; proc.stderr.on('data', (d) => { err += d; if (process.env.DBG) process.stderr.write('SRV ' + d); });
   for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${PORT}/nyx.js`); return; } catch { await sleep(100); } }
   throw new Error('server did not start: ' + err);
 }
@@ -281,11 +281,46 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
   r = await call('POST', '/auth/passkey/verify', { body: { ticket: r.j.ticket, response: stranger.get(r.j.options, ORIGIN) } });
   await t.test('unknown passkey is rejected', () => assert.strictEqual(r.status, 401));
 
+  // password reset link (owner → teammate)
+  const veraId = (await call('GET', '/api/team', { token: owner })).j.users.find((u) => u.username === 'vera').id;
+  r = await call('POST', `/api/team/users/${veraId}/reset-link`, { token: viewer });
+  await t.test('viewer cannot create reset links', () => assert.strictEqual(r.status, 403));
+  r = await call('POST', `/api/team/users/${veraId}/reset-link`, { token: owner });
+  const oldReset = r.j.url.split('/').pop();
+  r = await call('POST', `/api/team/users/${veraId}/reset-link`, { token: owner });
+  const reset = r.j.url.split('/').pop();
+  await t.test('only the newest reset link works', async () => assert.strictEqual((await call('GET', '/api/reset/' + oldReset)).status, 404));
+  r = await call('GET', '/api/reset/' + reset);
+  await t.test('reset link names the account', () => assert.strictEqual(r.j.username, 'vera'));
+  r = await call('POST', '/api/reset/' + reset, { body: { password: 'short' } });
+  await t.test('reset: short password rejected, link stays valid', async () => {
+    assert.strictEqual(r.status, 400);
+    assert.strictEqual((await call('GET', '/api/reset/' + reset)).status, 200);
+  });
+  r = await call('POST', '/api/reset/' + reset, { body: { password: 'vera-new-password-1' } });
+  await t.test('reset sets the new password and gives no session', () => { assert.strictEqual(r.j.ok, true); assert.ok(!r.j.token); });
+  await t.test('reset ends the old sessions', async () => assert.strictEqual((await call('GET', '/api/me', { token: viewer })).status, 401));
+  await t.test('old password no longer works, new one does', async () => {
+    assert.strictEqual((await call('POST', '/auth/login', { body: { username: 'vera', password: 'viewer-password-1' } })).status, 401);
+    assert.ok((await call('POST', '/auth/login', { body: { username: 'vera', password: 'vera-new-password-1' } })).j.token);
+  });
+  r = await call('POST', '/api/reset/' + reset, { body: { password: 'vera-new-password-2' } });
+  await t.test('reset link works only once', () => assert.strictEqual(r.status, 404));
+  r = await call('POST', '/api/team/users/' + fabiId + '/reset-link', { token: owner });
+  r = await call('POST', '/api/reset/' + r.j.url.split('/').pop(), { body: { password: 'owner-password-new' } });
+  r = await call('POST', '/auth/login', { body: { username: 'fabi', password: 'owner-password-new' } });
+  await t.test('reset link does not turn off 2FA', () => { assert.strictEqual(r.j.mfa, 'totp'); assert.ok(!r.j.token); });
+  {
+    // passkey session of the owner ended by the reset → sign in again with the passkey
+    const o = await call('POST', '/auth/passkey/options');
+    owner = (await call('POST', '/auth/passkey/verify', { body: { ticket: o.j.ticket, response: key.get(o.j.options, ORIGIN) } })).j.token;
+  }
+
   // storage + restart
   await stop();
   await t.test('no plain session token, invite token or recovery code in the DB', () => {
     const raw = fs.readFileSync(DB_PATH).toString('latin1') + (fs.existsSync(DB_PATH + '-wal') ? fs.readFileSync(DB_PATH + '-wal').toString('latin1') : '');
-    for (const s of [owner, viaPasskey, viewer, viewerInvite, recovery[1], 'owner-password-1']) assert.ok(!raw.includes(s), 'found plain secret in DB');
+    for (const s of [owner, viaPasskey, viewer, viewerInvite, reset, recovery[1], 'owner-password-1', 'vera-new-password-1']) assert.ok(!raw.includes(s), 'found plain secret in DB');
   });
   await start();
   await t.test('sessions survive a restart', async () => assert.strictEqual((await call('GET', '/api/me', { token: owner })).status, 200));
