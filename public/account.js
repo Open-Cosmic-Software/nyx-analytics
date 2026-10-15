@@ -13,10 +13,17 @@
     return fetch(path, { method: 'POST', headers: h, body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); });
   }
+  // a body that is not JSON (e.g. the SPA page from a server that lacks the route) is an ERROR, never {} —
+  // {} or a string would reach rows.map / t.users and break far from the cause (Kiro, 2.2.0)
+  function readJson(r) {
+    var ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
+    if (!/\bjson\b/i.test(ct)) return Promise.reject(new Error(r.ok ? 'Server did not answer with JSON (HTTP ' + r.status + ')' : 'HTTP ' + r.status));
+    return r.json().catch(function () { throw new Error('Server did not answer with JSON (HTTP ' + r.status + ')'); });
+  }
   // authenticated calls that also report errors (Taci.api only throws on 401)
   function call(method, path, body) {
     return fetch(path, { method: method, headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('nyx_token') || '' }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; }); });
+      .then(function (r) { return readJson(r).then(function (j) { if (!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); return j; }); });
   }
 
   // ── WebAuthn: JSON options (base64url) ⇄ browser ArrayBuffers ──

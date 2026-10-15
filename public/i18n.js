@@ -163,6 +163,7 @@
     [/^(.+) · (2FA on|no 2FA)((?: · \d+ passkeys?)?) · last sign-in (.+)$/, function (m, s, a, pk, d) { return s.replace('all sites', 'alle Seiten') + ' · ' + (a === '2FA on' ? '2FA an' : 'ohne 2FA') + pk + ' · letzte Anmeldung ' + d; }],
     [/^(\d+) visitors$/, '$1 Besucher'], [/^(\d+) views$/, '$1 Aufrufe'], [/^added (.+)$/, 'hinzugefügt $1'],
     [/^used (.+)$/, 'benutzt $1'], [/^last sign-in (.+)$/, 'letzte Anmeldung $1'], [/^expires (.+)$/, 'läuft ab $1'], [/^Last sent (.+)$/, 'Zuletzt gesendet $1'],
+    [/^Server did not answer with JSON \(HTTP (\d+)\)$/, 'Der Server hat nicht mit JSON geantwortet (HTTP $1). Bitte neu laden.'],
     [/^Send this to (.+)\. It works once, for 24 hours\. Their 2FA stays on\.$/, 'Schick das an $1. Funktioniert einmal, 24 Stunden lang. Die 2FA bleibt an.'],
   ];
 

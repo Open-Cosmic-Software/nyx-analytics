@@ -1193,7 +1193,6 @@ if (process.env.TACILYTICS_TEST_HOOKS === '1') {
   app.post('/api/_test/report-tick', requireRole('owner'), async (req, res) => res.json(await reportTick(Number((req.body || {}).now) || Date.now())));
 }
 
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── data retention (privacy by design: minimise what we keep) ─────────────────
 // When DATA_RETENTION_DAYS > 0, raw events older than the window are purged daily.
@@ -1308,5 +1307,11 @@ if (process.env.TACILYTICS_ALERT_TICK !== 'off') setInterval(() => { alertTick()
 if (process.env.TACILYTICS_TEST_HOOKS === '1') {
   app.post('/api/_test/alert-tick', requireRole('owner'), async (req, res) => res.json(await alertTick(Number((req.body || {}).now) || Date.now())));
 }
+
+// ── fallbacks: LAST, after every route (a route registered below these would never be reached) ──
+// unknown API paths are a 404 in JSON — never the SPA page. A client that asks an older/newer server for a
+// route it doesn't have must get an error it can show, not HTML it would try to read as data (Kiro, 2.2.0).
+app.all(/^\/(api|auth)(\/|$)/, (_req, res) => res.status(404).json({ error: 'Not found' }));
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, '127.0.0.1', () => console.log(`Tacilytics on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
