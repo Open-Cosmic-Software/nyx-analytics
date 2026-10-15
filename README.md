@@ -273,8 +273,10 @@ Out of the box the dashboard opens with one shared passphrase (`WEB_PASSWORD`). 
 | Role | Can |
 |---|---|
 | **Owner** | everything, including the team |
-| **Admin** | add/remove sites, share links, funnels |
+| **Admin** | add/remove sites, share links, funnels — optionally limited to **specific sites** |
 | **Viewer** | read only — optionally limited to **specific sites** |
+
+**Hosting several customers on one instance** (2.3): give each customer an **admin limited to their sites**. A site they add joins their list; a domain that already belongs to someone else is refused (409) instead of being shared. Pause a site with `PATCH /api/sites/:id {"paused": true}` (server key or an unlimited owner/admin): it collects nothing until resumed, the data stays. `GET /api/v1/usage?month=YYYY-MM` lists page views per site for volume checks (operator only). The operator's `DIGEST_WEBHOOK_URL` is never used for alerts of limited accounts; set `DIGEST_WEBHOOK_URL=off` on a shared instance so the daily digest does not list customer domains. `DASHBOARD_EXTRA_SCRIPT=/path.js` adds one same-origin script to the dashboard (e.g. a billing banner served by your own proxy).
 
 Everyone can turn on, **optionally**:
 
@@ -303,6 +305,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
 | `DIGEST_WEBHOOK_URL` | — | Daily digest + default alert target (Discord/Slack-compatible). `off` disables it |
+| `DASHBOARD_EXTRA_SCRIPT` | — | One same-origin script added to the dashboard page (hosting banner). Only a plain path like `/cloud/ui.js`; URLs, `//` and `..` are ignored |
 | `WATCH_MIN_VISITORS` | `10` | Spike/drop alerts stay silent below this many visitors per hour |
 | `SMTP_URL` / `REPORT_FROM` | — | Mail server + sender for the weekly report |
 | `REPORT_HOUR_UTC` | `6` | Monday hour (UTC) the weekly report goes out; it covers the last 7 full days in each site's time zone |
