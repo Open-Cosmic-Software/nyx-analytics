@@ -420,6 +420,56 @@
     });
   }
 
+  // ── import history (Plausible / GA4) ──
+  var impSrc = 'plausible';
+  var IMP_HOWTO = {
+    plausible: 'In Plausible: <strong>Site settings → Imports &amp; Exports → Export data</strong>. Upload the ZIP you get (or the CSV files in it).',
+    ga: 'In Google Analytics 4: open a report (e.g. <strong>Pages and screens</strong>, <strong>Traffic acquisition</strong>, <strong>Demographic details</strong>), add <strong>Date</strong> as a secondary dimension, then <strong>Share → Download file → CSV</strong>. One file per report; pick several at once.',
+  };
+  function openImport() {
+    $('importModal').classList.remove('hide'); $('impErr').textContent = ''; $('impStatus').textContent = ''; $('impSite').textContent = state.site;
+    setImpSrc(impSrc); loadImports();
+  }
+  function setImpSrc(src) {
+    impSrc = src;
+    Array.prototype.forEach.call($('impTabs').children, function (b) { b.classList.toggle('active', b.dataset.src === src); });
+    $('impHowto').innerHTML = IMP_HOWTO[src];
+  }
+  function loadImports() {
+    api('/api/imports?site=' + encodeURIComponent(state.site)).then(function (r) {
+      if (r.error) return;
+      $('impList').innerHTML = r.imports.length ? '<div class="set-card"><h3>Imported</h3>' + r.imports.map(function (i) {
+        return '<div class="set-row"><span><strong>' + (i.source === 'ga' ? 'Google Analytics' : 'Plausible') + '</strong> ' + esc(i.first_day || '?') + ' – ' + esc(i.last_day || '?') +
+          ' <span class="muted small">· ' + Number(i.pageviews).toLocaleString() + ' views' + (i.created_by ? ' · by ' + esc(i.created_by) : '') + '</span></span>' +
+          '<button class="btn ghost danger mini" data-delimp="' + i.id + '">Remove</button></div>';
+      }).join('') + (r.countsUntil ? '<p class="muted small" style="margin:8px 0 0">Own data starts ' + esc(r.countsUntil) + '; imported days from then on are ignored.</p>' : '') + '</div>' : '';
+      $('impList').querySelectorAll('[data-delimp]').forEach(function (b) {
+        b.onclick = function () { if (confirm('Remove this import? The imported numbers disappear from all charts.')) api('/api/imports/' + b.dataset.delimp, { method: 'DELETE' }).then(function () { loadImports(); load(); }); };
+      });
+    });
+  }
+  $('importBtn').onclick = openImport;
+  $('closeImport').onclick = function () { $('importModal').classList.add('hide'); };
+  $('impTabs').onclick = function (e) { var b = e.target.closest('button'); if (b) setImpSrc(b.dataset.src); };
+  $('impGo').onclick = function () {
+    var files = Array.prototype.slice.call($('impFile').files || []);
+    $('impErr').textContent = '';
+    if (!files.length) { $('impErr').textContent = 'Choose a file first'; return; }
+    var done = 0, views = 0;
+    $('impStatus').textContent = 'Uploading…';
+    // one request per file: each file becomes its own import (and can be removed on its own)
+    files.reduce(function (p, f) {
+      return p.then(function () {
+        return fetch('/api/imports?site=' + encodeURIComponent(state.site) + '&source=' + impSrc + '&name=' + encodeURIComponent(f.name), {
+          method: 'POST', headers: { 'x-session-token': localStorage.getItem('nyx_token') || '', 'Content-Type': /\.zip$/i.test(f.name) ? 'application/zip' : 'text/csv' }, body: f,
+        }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(f.name + ': ' + (j.error || r.status)); done++; views += j.pageviews || 0; if (j.note) $('impStatus').textContent = j.note; }); });
+      });
+    }, Promise.resolve()).then(function () {
+      $('impStatus').textContent = done + ' file' + (done > 1 ? 's' : '') + ' imported (' + views.toLocaleString() + ' views). ' + ($('impStatus').textContent.indexOf('Days from') === 0 ? $('impStatus').textContent : '');
+      $('impFile').value = ''; loadImports(); load();
+    }).catch(function (e) { $('impErr').textContent = e.message; $('impStatus').textContent = ''; loadImports(); load(); });
+  };
+
   // ── alerts ──
   var KIND_LABEL = { spike: 'Traffic spike', drop: 'Traffic drop', goal: 'Goal' };
   function openAlerts() {
@@ -624,6 +674,10 @@
     api('/api/stats?' + statsQuery()).then(function (s) {
       if (s.error) return;
       lastStats = s;
+      var imn = $('importedNote');
+      if (s.imported && s.imported.included) { imn.textContent = 'Includes imported history' + (s.imported.until ? ' (until ' + s.imported.until + ')' : '') + '.'; imn.classList.remove('hide'); }
+      else if (s.imported && s.imported.excludedByFilter) { imn.textContent = 'Imported history is hidden while a filter is active.'; imn.classList.remove('hide'); }
+      else imn.classList.add('hide');
       $('s-visitors').textContent = fmt(s.totals.visitors);
       $('s-pageviews').textContent = fmt(s.totals.pageviews);
       $('s-bounce').textContent = s.totals.bounce + '%';
@@ -856,7 +910,7 @@
       state.site = info.domain;
       var sel = $('siteSelect');
       sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
-      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn', 'alertsBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn', 'alertsBtn', 'importBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
       syncLegend();
       load();
       clearInterval(window.__rt);

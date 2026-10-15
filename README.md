@@ -155,6 +155,15 @@ The server hashes the launch id with a random daily salt that is deleted when th
 Without `sid`, the usual IP + user-agent daily hash is used. Region comes from the timezone or
 device locale, never from IP geolocation.
 
+## Import from Google Analytics or Plausible
+
+**Import** (toolbar) brings your history along, so switching doesn't mean starting at zero.
+
+- **Plausible:** Site settings → Imports & Exports → *Export data*. Upload the ZIP (or the CSVs in it).
+- **Google Analytics 4:** open a report (*Pages and screens*, *Traffic acquisition*, *Demographic details*, *Tech*), add **Date** as a secondary dimension, *Share → Download file → CSV*. One file per report; English or German column names.
+
+Imported numbers are daily totals per dimension (pages, sources, countries, browsers, OS, devices, events) and count **only for days before your own data starts** — never twice. They appear in the chart, the totals and the panels; while a filter is active they are left out (they can't be combined), and the dashboard says so. Every import can be removed again. No visitor-level data is imported or stored.
+
 ## Notes in the chart
 
 Click **Notes** in the chart legend to mark a day — a newsletter, a release, a sale. A coral line and a diamond appear on that day, the note shows in the tooltip, and everyone with access to the site (including share links) sees it. Admins and owners add and remove notes. `GET /api/annotations?site=…` lists them; `/stats` returns the ones in its range as `annotations`.

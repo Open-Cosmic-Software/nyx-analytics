@@ -97,6 +97,7 @@
       <button class="btn ghost" id="exportBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-download"></use></svg>CSV</button>
       <button class="btn ghost" id="alertsBtn" title="Get a message on traffic spikes, drops or reached goals"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-bell"></use></svg>Alerts</button>
       <button class="btn ghost" id="shareBtn" title="Create a public read-only link"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-share"></use></svg>Share</button>
+      <button class="btn ghost" id="importBtn" title="Bring your history from Google Analytics or Plausible"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-download"></use></svg>Import</button>
       <button class="btn ghost" id="snippetBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-code"></use></svg>Embed code</button>
     </div>
   </div>
@@ -131,6 +132,7 @@
         </div>
       </div>
       <svg id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
+      <p class="muted small hide" id="importedNote" style="margin:8px 2px 0"></p>
     </div>
 
     <div class="panels">
@@ -274,6 +276,26 @@
   </div>
 </div>
 
+<!-- Import -->
+<div id="importModal" class="modal-overlay hide">
+  <div class="modal modal-wide settings">
+    <h2>Import history into <span id="impSite"></span></h2>
+    <p>Bring your old numbers along. They show up in the chart and in the panels for the days <strong>before</strong> Tacilytics started counting — never twice.</p>
+    <div id="impErr" class="err" role="alert"></div>
+    <div class="tabs set-tabs" id="impTabs" style="margin:0 0 12px">
+      <button data-src="plausible" class="active">Plausible</button>
+      <button data-src="ga">Google Analytics 4</button>
+    </div>
+    <div class="set-card">
+      <p class="muted small" id="impHowto"></p>
+      <div class="set-inline"><input type="file" id="impFile" accept=".zip,.csv" multiple><button class="btn" id="impGo">Import</button></div>
+      <p class="muted small" id="impStatus" style="margin:8px 0 0"></p>
+    </div>
+    <div id="impList"></div>
+    <button class="btn ghost" id="closeImport" style="margin-top:12px">Close</button>
+  </div>
+</div>
+
 <!-- Alerts -->
 <div id="alertsModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
@@ -339,6 +361,6 @@
 
 <div class="tip" id="tip"></div>
 <script src="/account.js?v=2.3.0"></script>
-<script src="/app.js?v=2.5.0"></script>
+<script src="/app.js?v=2.6.0"></script>
 </body>
 </html>

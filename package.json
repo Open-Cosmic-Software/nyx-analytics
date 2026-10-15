@@ -50,6 +50,7 @@
     "cli.js",
     "day-salt.js",
     "auth.js",
+    "importers.js",
     "tz-country.js",
     "public/",
     "sdk/flutter/",

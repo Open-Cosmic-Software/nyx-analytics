@@ -464,3 +464,7 @@ body.role-viewer #annBtn { display: none !important; }
 @media (max-width: 560px) { .act-ip { display: none; } }
 body.role-viewer #alertsBtn { display: none !important; }
 #alertsList [data-al-test] { min-width: 72px; justify-content: center; }
+body.role-viewer #importBtn { display: none !important; }
+#impFile { flex: 1 1 240px; color: var(--text-dim); font-size: .82rem; }
+#impFile::file-selector-button { font: 600 .8rem inherit; font-family: inherit; color: var(--text); background: rgba(255,255,255,.04); border: 1px solid var(--line-strong); border-radius: 9px; padding: 7px 12px; margin-right: 10px; cursor: pointer; }
+#impFile::file-selector-button:hover { background: rgba(255,255,255,.08); }

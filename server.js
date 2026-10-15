@@ -103,6 +103,31 @@ db.exec(`
     steps TEXT NOT NULL, -- JSON array of {type:'page'|'goal', value}
     created INTEGER NOT NULL
   );
+  -- imported history (Plausible / Google Analytics): daily aggregates, never visitor rows
+  CREATE TABLE IF NOT EXISTS imported (
+    import_id INTEGER NOT NULL,
+    site_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    dim TEXT NOT NULL,          -- '' totals · page · source · country · browser · os · device · event
+    name TEXT NOT NULL,
+    visitors INTEGER NOT NULL DEFAULT 0,
+    pageviews INTEGER NOT NULL DEFAULT 0,
+    visits INTEGER NOT NULL DEFAULT 0,
+    bounces INTEGER NOT NULL DEFAULT 0,
+    duration INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_imported_site_dim_day ON imported(site_id, dim, day);
+  CREATE TABLE IF NOT EXISTS imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL,
+    source TEXT NOT NULL,       -- 'plausible' | 'ga'
+    first_day TEXT, last_day TEXT,
+    rows INTEGER NOT NULL DEFAULT 0,
+    pageviews INTEGER NOT NULL DEFAULT 0,
+    files TEXT,
+    created_by TEXT,
+    created INTEGER NOT NULL
+  );
   -- chart annotations ("Newsletter sent", "Release 2.0") — one calendar day each
   CREATE TABLE IF NOT EXISTS annotations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,7 +279,9 @@ if (TRUST_PROXY > 0) {
   });
 }
 // Accept both application/json (dashboard) and text/plain (cross-origin beacons).
-app.use(express.json({ limit: '32kb', type: ['application/json', 'text/plain'] }));
+// /api/imports takes raw files (handled there); everything else is JSON (text/plain = cross-origin beacons)
+const jsonBody = express.json({ limit: '32kb', type: ['application/json', 'text/plain'] });
+app.use((req, res, next) => (req.path === '/api/imports' ? next() : jsonBody(req, res, next)));
 app.disable('x-powered-by');
 
 // Lightweight in-memory rate limiter (fixed window per key). No external dep.
@@ -405,6 +432,8 @@ app.delete('/api/sites/:id', adminOnly, (req, res) => {
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM annotations WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM alerts WHERE site_id = ?').run(id);
+  db.prepare('DELETE FROM imported WHERE site_id = ?').run(id);
+  db.prepare('DELETE FROM imports WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -468,6 +497,41 @@ function eventPlatformFilter(query) {
   return f;
 }
 
+// name shown as "created by" (same wording as the activity log)
+function whoDid(req) {
+  const p = req.principal;
+  if (!p) return null;
+  if (p.kind === 'user') return p.user.username;
+  if (p.kind === 'userkey') return p.user.username + ' (API key)';
+  if (p.kind === 'apikey') return 'API key';
+  if (p.kind === 'legacy') return 'passphrase';
+  return null;
+}
+
+// ── imported history helpers ──
+const firstNativeDay = db.prepare('SELECT MIN(day) d FROM events WHERE site_id = ?');
+function importedFor(siteId, start, end, filtered) {
+  const exists = !!db.prepare('SELECT 1 FROM imports WHERE site_id = ? LIMIT 1').get(siteId);
+  const off = { exists, on: false, filtered: exists && filtered, tot: { pageviews: 0, visitors: 0 }, days: [], top: () => [], until: null };
+  if (!exists || filtered) return off;
+  // imported days count only before the first day with own data
+  const first = firstNativeDay.get(siteId).d;
+  const from = new Date(start).toISOString().slice(0, 10);
+  const lastDay = new Date(end - 1).toISOString().slice(0, 10);
+  const to = first && first <= lastDay ? new Date(Date.parse(first + 'T00:00:00Z') - 864e5).toISOString().slice(0, 10) : lastDay;
+  if (to < from) return { ...off, until: first };
+  const days = db.prepare("SELECT day, SUM(visitors) visitors, SUM(pageviews) pageviews FROM imported WHERE site_id = ? AND dim = '' AND day >= ? AND day <= ? GROUP BY day").all(siteId, from, to);
+  const tot = days.reduce((a, r) => ({ pageviews: a.pageviews + r.pageviews, visitors: a.visitors + r.visitors }), { pageviews: 0, visitors: 0 });
+  const top = (dim) => db.prepare('SELECT name, SUM(pageviews) pageviews, SUM(visitors) visitors FROM imported WHERE site_id = ? AND dim = ? AND day >= ? AND day <= ? GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 200').all(siteId, dim, from, to);
+  return { exists, on: days.length > 0, filtered: false, tot, days, top, until: first };
+}
+function mergeTop(native, imported, limit) {
+  const m = new Map();
+  for (const r of native) m.set(r.name, { name: r.name, pageviews: r.pageviews, visitors: r.visitors });
+  for (const r of imported) { const e = m.get(r.name) || { name: r.name, pageviews: 0, visitors: 0 }; e.pageviews += r.pageviews; e.visitors += r.visitors; m.set(r.name, e); }
+  return [...m.values()].sort((a, b) => b.visitors - a.visitors || b.pageviews - a.pageviews).slice(0, limit);
+}
+
 function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
@@ -485,6 +549,10 @@ function statsHandler(req, res) {
   if (goal) { where += ' AND vh IN (SELECT vh FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name = ?)'; args.push(sid, start, end, goal); }
 
   const totals = db.prepare(`SELECT COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where}`).get(...args);
+  // imported history counts only for days before the site's first own event (no double counting)
+  // and only without segment filters (imported data is pre-aggregated per single dimension).
+  const imp = importedFor(sid, start, end, clauses.length > 0 || !!goal || !!evf);
+  if (imp.on) { totals.pageviews += imp.tot.pageviews; totals.visitors += imp.tot.visitors; }
   const bounceRow = db.prepare(`SELECT COUNT(*) AS bounced FROM (SELECT vh, COUNT(*) c FROM events WHERE ${where} GROUP BY vh HAVING c = 1)`).get(...args);
   const bounce = totals.visitors ? Math.round((bounceRow.bounced / totals.visitors) * 100) : 0;
   const viewsPerVisitor = totals.visitors ? +(totals.pageviews / totals.visitors).toFixed(1) : 0;
@@ -496,6 +564,7 @@ function statsHandler(req, res) {
   const prevArgs = args.slice(); prevArgs[1] = start - len; prevArgs[2] = start;
   if (goal) { prevArgs[prevArgs.length - 3] = start - len; prevArgs[prevArgs.length - 2] = start; }
   const prev = db.prepare(`SELECT COUNT(*) pageviews, COUNT(DISTINCT vh) visitors FROM events WHERE ${where}`).get(...prevArgs);
+  if (imp.on) { const pi = importedFor(sid, start - len, start, false); if (pi.on) { prev.pageviews += pi.tot.pageviews; prev.visitors += pi.tot.visitors; } }
   const pct = (cur, was) => (was ? Math.round(((cur - was) / was) * 100) : null);
 
   // time series (per hour for a single day, else per day)
@@ -511,6 +580,7 @@ function statsHandler(req, res) {
   } else {
     const rows = db.prepare(`SELECT day, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${where} GROUP BY day`).all(...args);
     const map = new Map(rows.map((r) => [r.day, r]));
+    if (imp.on) for (const r of imp.days) { const e = map.get(r.day) || { day: r.day, pv: 0, v: 0 }; e.pv += r.pageviews; e.v += r.visitors; map.set(r.day, e); }
     series = Array.from({ length: days }, (_, i) => {
       const d = new Date(start + i * 864e5).toISOString().slice(0, 10);
       const r = map.get(d);
@@ -529,9 +599,13 @@ function statsHandler(req, res) {
     yoy = { visitors: pct(totals.visitors, y.visitors), pageviews: pct(totals.pageviews, y.pageviews), was: y };
   }
 
-  const topBy = (col, limit = 8) => db.prepare(
+  const topByRaw = (col, limit = 8) => db.prepare(
     `SELECT ${col} AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND ${col} IS NOT NULL AND ${col} != '' GROUP BY ${col} ORDER BY visitors DESC, pageviews DESC LIMIT ${limit}`,
   ).all(...args);
+  const IMP_DIM = { path: 'page', country: 'country', browser: 'browser', os: 'os', device: 'device' };
+  // native + imported for the same dimension; visitors are summed per day-bucket (an approximation,
+  // like every imported breakdown — imported data has no visitor identity to deduplicate)
+  const topBy = (col, limit = 8) => (imp.on && IMP_DIM[col] ? mergeTop(topByRaw(col, 200), imp.top(IMP_DIM[col]), limit) : topByRaw(col, limit));
 
   // entry / exit pages: first / last pageview of each visit (vh,day), counted as visits.
   const edge = (dir, limit = 8) => db.prepare(
@@ -544,7 +618,8 @@ function statsHandler(req, res) {
   const goalRows = db.prepare(
     `SELECT name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE site_id = ? AND ts >= ? AND ts < ?${evf} AND name IS NOT NULL GROUP BY name ORDER BY visitors DESC, pageviews DESC LIMIT 12`,
   ).all(sid, start, end);
-  const goals = goalRows.map((g) => ({ ...g, cr: totals.visitors ? +((g.visitors / totals.visitors) * 100).toFixed(1) : 0 }));
+  const goalRowsAll = imp.on ? mergeTop(goalRows, imp.top('event'), 12) : goalRows;
+  const goals = goalRowsAll.map((g) => ({ ...g, cr: totals.visitors ? +((g.visitors / totals.visitors) * 100).toFixed(1) : 0 }));
 
   // properties: only meaningful when drilled into a single goal — top values per property key.
   let properties = null;
@@ -570,6 +645,7 @@ function statsHandler(req, res) {
   const srcAll = db.prepare(
     `SELECT source AS name, COUNT(*) AS pageviews, COUNT(DISTINCT vh) AS visitors FROM events WHERE ${where} AND source IS NOT NULL AND source != '' GROUP BY source ORDER BY visitors DESC, pageviews DESC LIMIT 40`,
   ).all(...args);
+  if (imp.on) { const merged = mergeTop(srcAll, imp.top('source'), 40); srcAll.length = 0; srcAll.push(...merged); }
   const sourcesClean = srcAll.filter((r) => !isPaymentHost(r.name)).slice(0, 8);
   const paymentReturns = srcAll.filter((r) => isPaymentHost(r.name));
 
@@ -656,6 +732,7 @@ function statsHandler(req, res) {
     previous: { visitors: prev.visitors, pageviews: prev.pageviews },
     yoy,
     dataSince: firstTs ? new Date(firstTs).toISOString().slice(0, 10) : null,
+    imported: imp.exists ? { included: imp.on, excludedByFilter: imp.filtered, until: imp.until } : null,
     series,
     annotations: db.prepare('SELECT id, day, text, created_by FROM annotations WHERE site_id = ? AND day >= ? AND day <= ? ORDER BY day, id')
       .all(sid, new Date(start).toISOString().slice(0, 10), new Date(end - 1).toISOString().slice(0, 10)),
@@ -733,6 +810,51 @@ app.get('/api/share-info/:token', (req, res) => {
   res.json({ domain: site.domain, name: site.name });
 });
 
+// ── import history: Plausible export ZIP / CSVs, Google Analytics 4 CSVs (owner/admin) ──
+const { parseImport } = require('./importers');
+app.post('/api/imports', adminOnly, express.raw({ type: ['application/zip', 'application/octet-stream', 'text/csv', 'text/plain'], limit: '60mb' }), (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  const source = String(req.query.source || '');
+  if (!['plausible', 'ga'].includes(source)) return res.status(400).json({ error: 'source must be plausible or ga' });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Upload a .zip or .csv file' });
+  const isZip = req.body.readUInt32LE(0) === 0x04034b50;
+  let parsed;
+  try { parsed = parseImport(source, isZip ? { zip: req.body } : { files: [{ name: String(req.query.name || 'upload.csv').slice(0, 120), text: req.body.toString('utf8') }] }); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  const rows = parsed.rows.filter((r) => r.visitors || r.pageviews);
+  if (!rows.length) return res.status(400).json({ error: 'The file contains no daily numbers' });
+  if (rows.length > 2e6) return res.status(400).json({ error: 'Too many rows' });
+  const daysTot = rows.filter((r) => r.dim === '').map((r) => r.day).sort();
+  const first = firstNativeDay.get(site.id).d;
+  const by = whoDid(req);
+  const id = db.transaction(() => {
+    const info = db.prepare('INSERT INTO imports (site_id, source, first_day, last_day, rows, pageviews, files, created_by, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(site.id, source, daysTot[0] || null, daysTot[daysTot.length - 1] || null, rows.length, rows.filter((r) => r.dim === '').reduce((a, r) => a + r.pageviews, 0), parsed.files.join(', ').slice(0, 500), by, Date.now());
+    const ins = db.prepare('INSERT INTO imported (import_id, site_id, day, dim, name, visitors, pageviews, visits, bounces, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const r of rows) ins.run(info.lastInsertRowid, site.id, r.day, r.dim, r.name || '', r.visitors, r.pageviews, r.visits || 0, r.bounces || 0, r.duration || 0);
+    return info.lastInsertRowid;
+  })();
+  const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(id);
+  audit(res, 'import.add', `${site.domain}: ${source} ${imp.first_day || '?'} – ${imp.last_day || '?'} (${imp.pageviews} views)`);
+  res.json({ ...imp, countsUntil: first, note: first && imp.last_day && imp.last_day >= first ? `Days from ${first} on already have own data — imported numbers count only before that day.` : null });
+});
+app.get('/api/imports', auth, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  res.json({ countsUntil: firstNativeDay.get(site.id).d, imports: db.prepare('SELECT id, source, first_day, last_day, rows, pageviews, files, created_by, created FROM imports WHERE site_id = ? ORDER BY id DESC').all(site.id) });
+});
+app.delete('/api/imports/:id', adminOnly, (req, res) => {
+  const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(Number(req.params.id));
+  if (!imp) return res.json({ ok: true });
+  if (!siteAllowed(req, imp.site_id)) return res.status(403).json(NO_SITE);
+  db.transaction(() => { db.prepare('DELETE FROM imported WHERE import_id = ?').run(imp.id); db.prepare('DELETE FROM imports WHERE id = ?').run(imp.id); })();
+  audit(res, 'import.remove', `${imp.source} ${imp.first_day || ''} – ${imp.last_day || ''}`);
+  res.json({ ok: true });
+});
+
 // ── chart annotations: list for a site (any reader of the site), add/remove (admin) ──
 app.get('/api/annotations', authOrShare, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
@@ -751,7 +873,7 @@ app.post('/api/annotations', adminOnly, (req, res) => {
   }
   const text = String(b.text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
   if (!text) return res.status(400).json({ error: 'Write a short note' });
-  const by = req.principal && req.principal.user ? req.principal.user.username : (req.principal && req.principal.kind === 'apikey' ? 'API' : null);
+  const by = whoDid(req);
   const info = db.prepare('INSERT INTO annotations (site_id, day, text, created_by, created) VALUES (?, ?, ?, ?, ?)').run(site.id, day, text, by, Date.now());
   audit(res, 'note.add', `${site.domain} ${day}: ${text}`);
   res.json({ id: info.lastInsertRowid, day, text, created_by: by });
