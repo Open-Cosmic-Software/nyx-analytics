@@ -159,6 +159,19 @@ device locale, never from IP geolocation.
 
 Click **Notes** in the chart legend to mark a day — a newsletter, a release, a sale. A coral line and a diamond appear on that day, the note shows in the tooltip, and everyone with access to the site (including share links) sees it. Admins and owners add and remove notes. `GET /api/annotations?site=…` lists them; `/stats` returns the ones in its range as `annotations`.
 
+## Weekly report by e-mail
+
+Settings → Security → **Weekly report**: enter an address and tick *every Monday*. Each person gets one mail per week for **the sites they can see** — visitors and pageviews vs. the week before, top pages, sources, goals and a link to the dashboard. *Send one now* sends a sample.
+
+Needs mail settings in `.env`:
+
+```env
+SMTP_URL=smtps://user:password@mail.example.com:465     # or smtp://…:587 (STARTTLS)
+REPORT_FROM=Tacilytics <reports@example.com>
+REPORT_HOUR_UTC=6                                         # Monday, this hour (UTC)
+TACILYTICS_ORIGIN=https://analytics.example.com           # for the dashboard link in the mail
+```
+
 ## Alerts
 
 **Alerts** (toolbar) sends a message to a webhook — Discord, Slack, or anything that takes JSON — when:
@@ -270,6 +283,8 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
 | `DIGEST_WEBHOOK_URL` | — | Daily digest + default alert target (Discord/Slack-compatible). `off` disables it |
 | `WATCH_MIN_VISITORS` | `10` | Spike/drop alerts stay silent below this many visitors per hour |
+| `SMTP_URL` / `REPORT_FROM` | — | Mail server + sender for the weekly report |
+| `REPORT_HOUR_UTC` | `6` | Monday hour (UTC) the weekly report goes out |
 | `AUDIT_RETENTION_DAYS` | `365` | How long the team activity log is kept (min. 30) |
 | `DATA_RETENTION_DAYS` | `0` | `0` = keep forever; `>0` purges raw events older than N days, daily (data minimisation) |
 

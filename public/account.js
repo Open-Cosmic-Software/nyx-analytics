@@ -231,6 +231,9 @@
           '<a class="btn ghost mini" target="_blank" rel="noopener" href="' + esc(d + '?tacilytics=on') + '">Count again</a></div>';
       }).join('') +
       '</div>' +
+      '<div class="set-card"><h3>' + ico('i-calendar') + 'Weekly report <span class="pill">e-mail</span></h3>' +
+      '<p class="muted">Every Monday morning: visitors, pageviews, top pages, sources and goals of last week for your sites, compared with the week before.</p>' +
+      '<div id="repBox"><p class="muted small">Loading…</p></div></div>' +
       '<div class="set-card"><h3>' + ico('i-code') + 'API keys</h3>' +
       '<p class="muted">For scripts, agents and the CLI (<code>TACILYTICS_API_KEY</code>). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.</p>' +
       '<div id="keyList"><p class="muted small">Loading…</p></div>' +
@@ -273,6 +276,24 @@
     if ($('newRecovery')) $('newRecovery').onclick = function () {
       call('POST', '/api/me/recovery', { password: $('totpPw').value }).then(function (r) { showRecovery(r.recoveryCodes); }).catch(function (e) { setErr(e.message); });
     };
+    call('GET', '/api/me/report').then(function (r) {
+      if (!r.configured) { $('repBox').innerHTML = '<p class="muted small">E-mail is not set up on this server yet (SMTP_URL and REPORT_FROM in .env).</p>'; return; }
+      $('repBox').innerHTML = '<div class="set-inline"><input id="repMail" type="email" placeholder="you@example.com" value="' + esc(r.email || '') + '">' +
+        '<label class="small muted" style="display:inline-flex;gap:6px;align-items:center;flex:0 0 auto"><input type="checkbox" id="repOn"' + (r.weekly ? ' checked' : '') + ' style="width:auto;margin:0"> every Monday</label>' +
+        '<button class="btn ghost" id="repSave">Save</button><button class="btn ghost" id="repNow">Send one now</button></div>' +
+        (r.last ? '<p class="muted small" style="margin:6px 0 0">Last sent ' + date(r.last) + '</p>' : '');
+      $('repSave').onclick = function () {
+        setErr('');
+        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked }).then(function () { $('repSave').textContent = 'Saved ✓'; }).catch(function (e) { setErr(e.message); });
+      };
+      $('repNow').onclick = function () {
+        setErr(''); $('repNow').textContent = 'Sending…';
+        call('POST', '/api/me/report', { email: $('repMail').value.trim(), weekly: $('repOn').checked })
+          .then(function () { return call('POST', '/api/me/report/send'); })
+          .then(function () { $('repNow').textContent = 'Sent ✓'; })
+          .catch(function (e) { $('repNow').textContent = 'Send one now'; setErr(e.message); });
+      };
+    }).catch(function () { $('repBox').innerHTML = ''; });
     function loadKeys() {
       call('GET', '/api/me/keys').then(function (keys) {
         $('keyList').innerHTML = keys.length ? keys.map(function (k) {
@@ -428,6 +449,8 @@
     'team.join': 'joined via invite', 'team.change': 'changed role', 'team.remove': 'removed member', 'team.2fa.reset': 'reset 2FA of',
     'team.reset-link': 'created password link for', 'me.password': 'changed own password', 'me.password.reset-link': 'set a new password via link',
     'me.2fa.on': 'turned 2FA on', 'me.2fa.off': 'turned 2FA off', 'me.recovery.new': 'made new recovery codes',
+    'me.report.on': 'turned the weekly report on', 'me.report.off': 'turned the weekly report off',
+    'alert.add': 'added alert', 'alert.remove': 'removed alert', 'alert.on': 'turned alert on', 'alert.off': 'turned alert off',
     'me.passkey.add': 'added passkey', 'me.passkey.remove': 'removed passkey', 'me.apikey.add': 'created API key', 'me.apikey.revoke': 'revoked API key',
   };
   function renderActivity(before, append) {
