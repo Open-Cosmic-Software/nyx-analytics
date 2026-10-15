@@ -501,6 +501,7 @@ app.get('/api/v1', (_req, res) => res.json({
     'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo, or from=YYYY-MM-DD&to=YYYY-MM-DD)',
     'GET /api/v1/realtime?site=': 'online count, last-30-min pulse + recent events',
     'GET /api/v1/usage?month=YYYY-MM': 'page views per site in a calendar month (UTC), owner / server key only',
+    'POST /api/v1/hit': 'server mode: report a page view from your web server { domain, path, ip, ua, referrer?, lang?, purpose?, name? } (write key)',
   },
   filters: 'add any of country,source,page,browser,os,device,lang,medium,campaign,goal to /stats to segment',
 }));
@@ -515,6 +516,61 @@ app.get('/api/v1/usage', requireRole('owner'), (req, res) => {
   res.json(db.prepare('SELECT s.id site_id, s.domain, COUNT(e.id) pageviews FROM sites s LEFT JOIN events e ON e.site_id = s.id AND e.ts >= ? AND e.ts < ? AND e.name IS NULL GROUP BY s.id ORDER BY s.id').all(from, to));
 });
 app.post('/api/v1/sites', adminOnly, sitesCreateHandler);
+
+// ── server mode (2.4): the website's own server reports a page view, no script on the visitor's device ──
+// The site's backend forwards what the visitor's request carried anyway: path, Referer, Accept-Language,
+// User-Agent and the visitor IP. The IP is only taken from an authenticated write key (never from the
+// public /api/collect), otherwise anyone could feed arbitrary IPs into the visitor hash. It is hashed
+// exactly like a tracker hit and never stored.
+const net = require('net');
+const PREFETCH_RE = /prefetch|prerender/i;
+// write access needed (admin role or a non-read-only key); a read-only key is a viewer and gets 403
+app.post('/api/v1/hit', adminOnly, (req, res) => {
+  if (rateLimited('h:' + clientIp(req), 6000, 60000)) return res.status(429).json({ error: 'Too many hits' });
+  const b = req.body || {};
+  const domain = norm(b.domain || b.d);
+  const site = domain && getSiteByDomain.get(domain);
+  if (!site || !siteAllowed(req, site.id)) return res.status(404).json({ error: 'Unknown site' });
+  if (site.paused) return res.status(202).end();
+  const ip = String(b.ip || '').trim();
+  // without the visitor IP every visitor would fall onto one hash: refuse instead of counting wrong
+  if (!net.isIP(ip)) return res.status(400).json({ error: 'ip (the visitor IP) is required for server mode' });
+  // prefetch / prerender requests are not visits (Sec-Purpose / Purpose header of the visitor request)
+  if (PREFETCH_RE.test(String(b.purpose || ''))) return res.status(204).end();
+  const rawUa = String(b.ua || '').slice(0, 512);
+  const ua = parseUA(rawUa);
+  if (!ua) return res.status(204).end(); // bot, crawler, monitor or no user agent
+  if (b.dnt === true || b.dnt === '1' || b.gpc === true || b.gpc === '1') return res.status(204).end(); // forwarded DNT / GPC (opt-in on the sending side)
+
+  const ts = Date.now();
+  const day = dayStr(ts);
+  let url;
+  try { url = new URL(String(b.path || b.p || '/').slice(0, 1024), 'http://x'); } catch { return res.status(400).json({ error: 'invalid path' }); }
+  let pth = url.pathname.slice(0, 512);
+  try { pth = decodeURI(pth); } catch {}
+  if (pth.length > 1) pth = pth.replace(/\/+$/, '') || '/';
+  const vh = visitorHash(site.id, ip, rawUa, day);
+  const intern = INTERNAL_PATHS[domain] || [];
+  if (intern.some((pre) => pth.startsWith(pre))) { insInternal.run(site.id, vh, day); return res.status(204).end(); }
+  if (isInternal.get(site.id, vh, day)) return res.status(204).end();
+
+  const referrer = String(b.referrer || b.r || '').slice(0, 512);
+  const q = url.searchParams;
+  let source = 'Direct';
+  const utm = String(q.get('utm_source') || q.get('ref') || '').slice(0, 60).trim();
+  if (utm) source = utm;
+  else if (referrer) { try { const h = norm(new URL(referrer).hostname); if (h && h !== domain) source = h; } catch {} }
+  const name = String(b.name || b.n || '').slice(0, 80).trim() || null; // optional server-side goal (e.g. Purchase)
+  insEvent.run({
+    site_id: site.id, ts, day, path: pth, source, referrer: referrer || null,
+    country: null, tz: null, browser: ua.browser, os: ua.os, device: ua.device,
+    lang: acceptLang(b.lang), name,
+    utm_medium: String(q.get('utm_medium') || '').slice(0, 60).trim() || null,
+    utm_campaign: String(q.get('utm_campaign') || '').slice(0, 80).trim() || null,
+    dur: null, props: name ? sanitizeProps(b.props) : null, vh, platform: null, app_version: null,
+  });
+  res.status(204).end();
+});
 
 // ── stats ────────────────────────────────────────────────────────────────────
 const TZ = require('./tz');

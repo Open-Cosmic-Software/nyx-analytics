@@ -130,6 +130,39 @@ In strict mode the tracker does not read local storage, the time zone, the langu
 
 What you give up: **no country** (it came from the time zone), **no scroll depth** (time on page stays), and `?tacilytics=off` does not work (the console says so) — exclude your own visits another way (e.g. a test browser you don't count, or filter yourself out in the dashboard). Strict mode does not decide whether you need consent; that depends on your jurisdiction and the rest of your website. This is not legal advice.
 
+### Server mode (no script at all)
+
+Server mode runs no script and reads or stores nothing on the visitor's device. Your web server reports each page view itself, from the request the visitor sent to your page anyway: path, `Referer`, `Accept-Language`, `User-Agent` and the visitor IP. Don't add the `<script>` tag on pages that use server mode; mixing both on one page would bring the script back.
+
+```http
+POST /api/v1/hit
+Authorization: Bearer tk_…            # a key created with write access (Settings → API keys), not read-only
+Content-Type: application/json
+
+{ "domain": "example.com", "path": "/shop?utm_source=news", "ip": "203.0.113.7",
+  "ua": "<User-Agent header>", "referrer": "<Referer header>", "lang": "<Accept-Language header>",
+  "purpose": "<Sec-Purpose or Purpose header>" }
+```
+
+Node / Express, after your static files and before your pages:
+
+```js
+app.use((req, res, next) => {
+  if (req.method === 'GET' && req.accepts('html')) fetch('https://analytics.example.com/api/v1/hit', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + process.env.TACILYTICS_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain: 'example.com', path: req.originalUrl, ip: req.ip, ua: req.get('user-agent'),
+      referrer: req.get('referer'), lang: req.get('accept-language'), purpose: req.get('sec-purpose') || req.get('purpose') }),
+  }).catch(() => {});
+  next();
+});
+```
+
+- **The visitor IP** is only accepted here, with a write key, never on the public `/api/collect`. It is hashed like a tracker hit (daily salt) and never stored. Behind a proxy or load balancer, send the real visitor IP (e.g. `req.ip` with Express `trust proxy` set right), not your proxy's. Without an IP the hit is refused (`400`), because all visitors would fall onto one hash.
+- **Filtered on our side:** bots and monitors (same list as the tracker), requests without a user agent, prefetch / prerender (`purpose`), and `dnt: true` / `gpc: true` if you choose to forward those headers. A site-limited key can only report for its own sites.
+- **Page caches and CDNs:** if a cache plugin or a CDN (e.g. Cloudflare) answers the request, your server code never runs and the visit is not reported. Report from somewhere every request passes, or exclude HTML from the cache.
+- **What you give up compared with the script:** no time on page, no scroll depth, no click / outbound / download events, no country, and no `?tacilytics=off`. Server-side goals work: add `"name": "Purchase", "props": { "value": 49.9 }`.
+- **Data protection:** the IP and user agent are personal data while they are hashed. That needs a legal basis (typically legitimate interest, GDPR Art. 6(1)(f)) and a sentence in your privacy policy. If someone else runs Tacilytics for you (for example Tacilytics Cloud), your server passes visitor IPs to them, so you need a data processing agreement (DPA). Server mode does not decide whether you need consent for the rest of your website. This is not legal advice.
+
 **Your own visits:** open your site once with `?tacilytics=off` (e.g. `https://example.com/?tacilytics=off`) and that browser is no longer counted on that site. `?tacilytics=on` undoes it. It is stored in the browser's localStorage, nothing is sent; repeat it on every browser and phone you use. Settings → Security has the links for all your sites.
 
 ## Mobile & desktop apps
@@ -240,6 +273,7 @@ curl -H "Authorization: Bearer $TACILYTICS_API_KEY" \
 | `POST /api/v1/sites` | add a site `{ domain }` |
 | `GET /api/v1/stats?site=&period=` | aggregated stats — `today \| 7d \| 30d \| 90d \| 12mo`, or `from=YYYY-MM-DD&to=YYYY-MM-DD` |
 | `GET /api/v1/realtime?site=` | online count, 30-min pulse + recent events |
+| `POST /api/v1/hit` | server mode: report a page view from your web server (write key), see [Server mode](#server-mode-no-script-at-all) |
 
 Add any of `country, source, page, browser, os, device, lang, medium, campaign, goal` to `/stats` to segment, e.g. `…/stats?site=example.com&period=30d&country=DE&medium=email`.
 
@@ -337,6 +371,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 - **Data minimisation:** set `DATA_RETENTION_DAYS` to auto-purge raw events after your chosen window.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
 - **Strict mode** (`data-strict`) skips the device reads (no localStorage, time zone, language or window size). See [Strict mode](#strict-mode).
+- **Server mode** (`POST /api/v1/hit`) runs no script on the visitor's device at all; your server reports the page view. See [Server mode](#server-mode-no-script-at-all).
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
 - Custom event properties are capped (scalars only, size-limited) so they can’t become a PII dumping ground.
 - Passwords hashed with scrypt; session tokens, invite links and recovery codes are stored only as SHA-256. Sessions live in the database (survive restarts, expire after 30 days).
@@ -351,6 +386,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 |---|---|---|
 | Cookies | ❌ none | ✅ yes |
 | Reads from the device | a few (time zone, language, window size, one localStorage flag); none in strict mode | ✅ a lot |
+| Works without any script on the visitor's device | ✅ server mode | ❌ |
 | Stores IPs / personal data | ❌ never | ✅ yes |
 | Self-hosted, you own the data | ✅ | ❌ |
 | Weight | ~2 KB | ~45 KB+ |
