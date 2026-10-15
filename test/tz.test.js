@@ -51,3 +51,51 @@ test('every instant falls in exactly one local day', () => {
     }
   }
 });
+
+test('segments: DST switch pinned to the minute, SQL day matches localDay', () => {
+  const Database = require('better-sqlite3');
+  const db = new Database(':memory:');
+  const a = U('2026-10-20T00:00:00Z'), b = U('2026-10-30T00:00:00Z');
+  const s = tz.segments('Europe/Berlin', a, b);
+  assert.strictEqual(s.length, 2);
+  assert.strictEqual(new Date(s[0].to).toISOString(), '2026-10-25T01:00:00.000Z');
+  assert.deepStrictEqual(s.map((x) => x.off), [120, 60]);
+  for (const z of ['Europe/Berlin', 'Asia/Kathmandu', 'Australia/Lord_Howe', 'America/St_Johns', 'UTC']) {
+    const from = U('2026-03-20T00:00:00Z'), to = U('2026-11-10T00:00:00Z');
+    const q = db.prepare(`SELECT ${tz.daySql(z, from, to, '?')} d`);
+    for (let t = from; t < to; t += 3600000 * 5 + 17 * 60000) assert.strictEqual(q.get(...Array(tz.segments(z, from, to).length).fill(t)).d, tz.localDay(z, t), z + ' ' + new Date(t).toISOString());
+  }
+});
+
+test('weekly report: last 7 LOCAL days, DST week = 7 days with 167/169 h (Tyto c)', () => {
+  const Database = require('better-sqlite3');
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE events (id INTEGER PRIMARY KEY, site_id INT, ts INT, day TEXT, path TEXT, vh TEXT, name TEXT, props TEXT, source TEXT, country TEXT, device TEXT, dur INT);
+    CREATE TABLE internal_vh (site_id INT, vh TEXT, day TEXT); CREATE TABLE annotations (id INTEGER PRIMARY KEY, site_id INT, day TEXT, text TEXT);`);
+  const ins = db.prepare("INSERT INTO events (site_id, ts, day, path, vh) VALUES (1, ?, ?, '/', ?)");
+  // Monday 27.10.2025 06:00 UTC; Berlin week = Mon 20.10. .. Sun 26.10. (the Sunday is 25 h)
+  const hit = (iso, vh) => ins.run(Date.parse(iso), iso.slice(0, 10), vh);
+  hit('2025-10-19T22:30:00Z', 'a'); // Mon 20.10. 00:30 Berlin → in the week (UTC: Sunday 19.10., outside)
+  hit('2025-10-26T22:30:00Z', 'b'); // Sun 26.10. 23:30 CET → in the week (25 h day)
+  hit('2025-10-26T23:30:00Z', 'c'); // Mon 27.10. 00:30 CET → today, outside
+  const { createReport } = require('../report');
+  const R = createReport(db);
+  const now = Date.parse('2025-10-27T06:00:00Z');
+  const ber = R.siteWeek(1, now, 'Europe/Berlin');
+  assert.deepStrictEqual([ber.from, ber.to, ber.timezone], ['2025-10-20', '2025-10-26', 'Europe/Berlin']);
+  assert.deepStrictEqual(ber.days.map((d) => d.dow), [1, 2, 3, 4, 5, 6, 0]);
+  assert.strictEqual(ber.cur.pv, 2);
+  assert.deepStrictEqual([ber.days[0].pv, ber.days[6].pv], [1, 1]);
+  const utc = R.siteWeek(1, now);
+  assert.deepStrictEqual([utc.from, utc.to, utc.cur.pv], ['2025-10-20', '2025-10-26', 2]); // b + c, not a
+  assert.strictEqual(R.siteWeek(1, now, 'Mars/Base').timezone, 'UTC');
+});
+
+test('alerts: baseline is the same LOCAL hour on earlier days (Tyto c)', () => {
+  // Wed 29.10.2025 09:00 CET (08:00Z); 7 days back is Wed 22.10. 09:00 CEST = 07:00Z, not 08:00Z
+  const t = U('2025-10-29T08:00:00Z');
+  assert.strictEqual(new Date(tz.sameLocalTime('Europe/Berlin', t, 7)).toISOString(), '2025-10-22T07:00:00.000Z');
+  assert.strictEqual(new Date(tz.sameLocalTime('Europe/Berlin', t, 1)).toISOString(), '2025-10-28T08:00:00.000Z');
+  assert.strictEqual(new Date(tz.sameLocalTime('UTC', t, 7)).toISOString(), '2025-10-22T08:00:00.000Z');
+  assert.strictEqual(new Date(tz.sameLocalTime('Asia/Kathmandu', t, 7)).toISOString(), '2025-10-22T08:00:00.000Z');
+});

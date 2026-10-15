@@ -53,4 +53,41 @@ function days(tz, from, to) {
 }
 // ISO weekday of a local day (0 = Sunday, like getUTCDay)
 function weekday(day) { return new Date(day + 'T12:00:00Z').getUTCDay(); }
-module.exports = { validTz, offsetMin, localDay, dayStart, addDays, days, weekday, DAY };
+// Offset segments covering [start, end): [{ from, to, off }] with off in minutes. Transitions are found
+// day by day and pinned to the minute by bisection, so a DST switch (or Lord Howe's 30-min one) lands
+// exactly where Intl says.
+function segments(tz, start, end) {
+  if (!tz || tz === 'UTC') return [{ from: start, to: end, off: 0 }];
+  const out = [];
+  let from = start, off = offsetMin(tz, start);
+  for (let t = start; t < end;) {
+    const next = Math.min(end, t + 6 * 36e5);
+    const o2 = offsetMin(tz, next === end ? end - 1 : next);
+    if (o2 !== off) {
+      let lo = t, hi = next === end ? end - 1 : next;
+      while (hi - lo > 60000) { const mid = Math.floor((lo + hi) / 2 / 60000) * 60000; if (offsetMin(tz, mid) === off) lo = mid; else hi = mid; }
+      out.push({ from, to: hi, off }); from = hi; off = o2;
+    }
+    t = next;
+  }
+  out.push({ from, to: end, off });
+  return out;
+}
+// SQL expression: ts shifted to local wall-clock ms. Only integers from segments() are inlined.
+function shiftSql(tz, start, end, col = 'ts') {
+  const seg = segments(tz, start, end).filter((s) => s.to > s.from);
+  const ms = (s) => String(Math.trunc(s.off) * 60000);
+  if (seg.length === 1) return `(${col} + ${ms(seg[0])})`;
+  let sql = '(' + col + ' + CASE';
+  for (let i = 0; i < seg.length - 1; i++) sql += ` WHEN ${col} < ${Math.trunc(seg[i].to)} THEN ${ms(seg[i])}`;
+  return sql + ` ELSE ${ms(seg[seg.length - 1])} END)`;
+}
+// SQL: local day 'YYYY-MM-DD' of ts
+function daySql(tz, start, end, col = 'ts') { return `date(${shiftSql(tz, start, end, col)} / 1000, 'unixepoch')`; }
+// same local wall-clock time d days earlier (= t - d×24h unless a DST switch lies between) — the alert
+// baseline compares "this hour" with the same LOCAL hour of earlier days
+function sameLocalTime(tz, t, d) {
+  const back = t - d * DAY;
+  return back + (offsetMin(tz, t) - offsetMin(tz, back)) * 60000;
+}
+module.exports = { sameLocalTime, segments, shiftSql, daySql, validTz, offsetMin, localDay, dayStart, addDays, days, weekday, DAY };

@@ -2,12 +2,13 @@
 // Weekly report: numbers + e-mail (HTML and plain text), in English or German.
 // Pure functions over the database; sending/scheduling stays in server.js.
 //
-// One block per site the person can see, covering the last 7 full UTC days compared with
+// One block per site the person can see, covering the last 7 full LOCAL days of the site's time zone
+// (sites.timezone, DST days 23/25 h) compared with
 // the 7 before: key figures, a day-by-day chart, highlights, pages, sources, countries,
 // devices, goals, shop numbers and the notes of that week. HTML is table-based with inline
 // styles only (mail clients drop <style> and flexbox), light design, max 600 px wide.
 
-const DAY = 864e5;
+const TZ = require('./tz');
 const SOURCE_NAMES = {
   'com.google.android.googlequicksearchbox': 'Google App (Android)', 'com.google.android.gm': 'Gmail App',
   'fb': 'Facebook', 'm.facebook.com': 'Facebook (mobile)', 'l.facebook.com': 'Facebook', 'lm.facebook.com': 'Facebook',
@@ -59,7 +60,6 @@ function createReport(db, { paymentHosts = [] } = {}) {
     totals: db.prepare(`SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${PV}`),
     bounced: db.prepare(`SELECT COUNT(*) n FROM (SELECT vh FROM events WHERE ${PV} GROUP BY vh HAVING COUNT(*) = 1)`),
     dur: db.prepare(`SELECT AVG(dur) d FROM events WHERE ${PV} AND dur IS NOT NULL`),
-    days: db.prepare(`SELECT day, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${PV} GROUP BY day`),
     pages: db.prepare(`SELECT path k, COUNT(DISTINCT vh) v, COUNT(*) pv FROM events WHERE ${PV} GROUP BY path ORDER BY v DESC, pv DESC LIMIT 50`),
     sources: db.prepare(`SELECT COALESCE(NULLIF(source, ''), 'Direct') k, COUNT(DISTINCT vh) v FROM events WHERE ${PV} GROUP BY k ORDER BY v DESC LIMIT 50`),
     countries: db.prepare(`SELECT COALESCE(NULLIF(country, ''), '?') k, COUNT(DISTINCT vh) v FROM events WHERE ${PV} GROUP BY k ORDER BY v DESC LIMIT 6`),
@@ -78,17 +78,21 @@ function createReport(db, { paymentHosts = [] } = {}) {
   }
   const toMap = (rows, f = 'v') => new Map(rows.map((r) => [r.k, r[f]]));
 
-  function siteWeek(sid, now) {
-    const today = new Date(now);
-    const end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-    const a = end - 7 * DAY, p = end - 14 * DAY;
+  // the local day is computed in SQL from ts; offsets come from tz.js as inlined integers only
+  const dayRowsFor = (sid, a, b, tz) => db.prepare(`SELECT ${TZ.daySql(tz, a, b)} day, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE ${PV} GROUP BY 1`).all(sid, a, b);
+  function siteWeek(sid, now, tz) {
+    tz = TZ.validTz(tz) || 'UTC';
+    const today = TZ.localDay(tz, now);
+    const end = TZ.dayStart(tz, today);
+    const fromDay = TZ.addDays(today, -7), prevDay = TZ.addDays(today, -14);
+    const a = TZ.dayStart(tz, fromDay), p = TZ.dayStart(tz, prevDay);
     const cur = windowStats(sid, a, end), prev = windowStats(sid, p, a);
-    const dayRows = new Map(q.days.all(sid, a, end).map((r) => [r.day, r]));
-    const prevDayRows = new Map(q.days.all(sid, p, a).map((r) => [r.day, r]));
+    const dayRows = new Map(dayRowsFor(sid, a, end, tz).map((r) => [r.day, r]));
+    const prevDayRows = new Map(dayRowsFor(sid, p, a, tz).map((r) => [r.day, r]));
     const days = [];
-    for (let t = a; t < end; t += DAY) {
-      const k = new Date(t).toISOString().slice(0, 10), pk = new Date(t - 7 * DAY).toISOString().slice(0, 10);
-      days.push({ day: k, dow: new Date(t).getUTCDay(), v: (dayRows.get(k) || {}).v || 0, pv: (dayRows.get(k) || {}).pv || 0, prevV: (prevDayRows.get(pk) || {}).v || 0 });
+    for (let i = 0; i < 7; i++) {
+      const k = TZ.addDays(fromDay, i), pk = TZ.addDays(prevDay, i);
+      days.push({ day: k, dow: TZ.weekday(k), v: (dayRows.get(k) || {}).v || 0, pv: (dayRows.get(k) || {}).pv || 0, prevV: (prevDayRows.get(pk) || {}).v || 0 });
     }
     const pagesPrev = toMap(q.pages.all(sid, p, a));
     const pages = q.pages.all(sid, a, end).map((r) => ({ ...r, prev: pagesPrev.get(r.k) || 0 }));
@@ -104,10 +108,10 @@ function createReport(db, { paymentHosts = [] } = {}) {
     const newSource = sources.find((x) => x.prev === 0 && x.v >= 3 && x.k !== 'Direct');
     const newGoal = goals.find((x) => x.prev === 0 && x.c >= 1);
     return {
-      from: new Date(a).toISOString().slice(0, 10), to: new Date(end - DAY).toISOString().slice(0, 10),
+      from: fromDay, to: TZ.addDays(today, -1), timezone: tz,
       cur, prev, days, pages: pages.slice(0, 5), sources: sources.slice(0, 5),
       countries: q.countries.all(sid, a, end), devices: q.devices.all(sid, a, end), goals: goals.slice(0, 5), shop,
-      notes: q.notes.all(sid, new Date(a).toISOString().slice(0, 10), new Date(end - DAY).toISOString().slice(0, 10)),
+      notes: q.notes.all(sid, fromDay, TZ.addDays(today, -1)),
       highlights: {
         best: best && best.v ? best : null,
         climber: climber && climber.gain >= Math.max(3, Math.round(climber.prev * 0.2)) ? climber : null,
@@ -132,7 +136,7 @@ function createReport(db, { paymentHosts = [] } = {}) {
     const dur = (s) => (s == null ? '–' : s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}&nbsp;${L.min}` : `${s}&nbsp;${L.s}`);
     const shortPath = (p) => (p.length > 58 ? p.slice(0, 55) + '…' : p);
 
-    const blocks = sites.map((st) => ({ st, n: siteWeek(st.id, now) })).filter((b) => b.n.cur.pv || b.n.prev.pv);
+    const blocks = sites.map((st) => ({ st, n: siteWeek(st.id, now, st.timezone) })).filter((b) => b.n.cur.pv || b.n.prev.pv);
     if (!blocks.length) return null;
     const n0 = blocks[0].n;
     const range = `${dateFmt(n0.from, { day: 'numeric', month: 'short' })} – ${dateFmt(n0.to, { day: 'numeric', month: 'short', year: 'numeric' })}`;

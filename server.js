@@ -1239,21 +1239,29 @@ if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).un
 // Configure DIGEST_WEBHOOK_URL (Discord-compatible) and optionally DIGEST_HOUR_UTC (default 7).
 const DIGEST_HOUR_UTC = Math.min(23, Math.max(0, parseInt(process.env.DIGEST_HOUR_UTC, 10) || 7));
 let lastDigestDay = null;
-async function sendDigest() {
-  const yStart = new Date(new Date(Date.now() - 864e5).toISOString().slice(0, 10)).getTime();
-  const yEnd = yStart + 864e5, pStart = yStart - 864e5;
+function digestBody(now = Date.now()) {
+  // "yesterday" per site, in the site's time zone (23/25 h on DST days)
   const lines = [];
+  let label = null;
   for (const site of allSites.all()) {
+    const tz = site.timezone || 'UTC';
+    const yDay = TZ.addDays(TZ.localDay(tz, now), -1);
+    const yStart = TZ.dayStart(tz, yDay), yEnd = TZ.dayStart(tz, TZ.addDays(yDay, 1)), pStart = TZ.dayStart(tz, TZ.addDays(yDay, -1));
+    if (!label) label = yDay;
     const cur = db.prepare('SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, yStart, yEnd);
     if (!cur.pv) continue; // silent sites stay out of the report
     const was = db.prepare('SELECT COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, pStart, yStart);
     const top = db.prepare("SELECT path, COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL GROUP BY path ORDER BY c DESC LIMIT 1").get(site.id, yStart, yEnd);
     const goals = db.prepare('SELECT COUNT(*) c FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NOT NULL').get(site.id, yStart, yEnd).c;
     const arrow = was.v ? (cur.v > was.v ? '⬆️' : cur.v < was.v ? '⬇️' : '➡️') : '✨';
-    lines.push(`**${site.domain}** ${arrow} ${cur.v} visitors · ${cur.pv} views${goals ? ` · ${goals} events` : ''}${top ? ` · top \`${top.path}\`` : ''}`);
+    lines.push(`**${site.domain}**${yDay !== label ? ` (${yDay})` : ''} ${arrow} ${cur.v} visitors · ${cur.pv} views${goals ? ` · ${goals} events` : ''}${top ? ` · top \`${top.path}\`` : ''}`);
   }
-  if (!lines.length) return;
-  const body = { username: 'Tacilytics', content: `📊 **Daily digest — ${new Date(yStart).toISOString().slice(0, 10)}**\n` + lines.join('\n') };
+  if (!lines.length) return null;
+  return { username: 'Tacilytics', content: `📊 **Daily digest — ${label}**\n` + lines.join('\n') };
+}
+async function sendDigest(now = Date.now()) {
+  const body = digestBody(now);
+  if (!body) return;
   try {
     const r = await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) console.error('digest webhook failed:', r.status);
@@ -1267,18 +1275,18 @@ if (DIGEST_WEBHOOK_URL) {
   }, 5 * 60000).unref();
 }
 
-// ── alert engine: every 10 min. Spike/drop compare the last hour with the median of the same UTC
-// hour over 14 days (avoids "every night is an incident"); goals count events in a rolling window.
+// ── alert engine: every 10 min. Spike/drop compare the last hour with the median of the same LOCAL
+// hour (site time zone — after a DST switch that is 23/25 h away, not 24) over 14 days (avoids "every night is an incident"); goals count events in a rolling window.
 // Sites without own rules keep the old behaviour when DIGEST_WEBHOOK_URL is set: spike + drop.
 const WATCH_MIN_VISITORS = Math.max(1, parseInt(process.env.WATCH_MIN_VISITORS, 10) || 10);
 const legacyFired = new Map(); // "siteId|kind" → ts, for the implicit default rules
 function median(a) { const s = [...a].sort((x, y) => x - y); return s.length ? (s[s.length >> 1] + s[(s.length - 1) >> 1]) / 2 : 0; }
-function trafficVerdict(siteId, now) {
+function trafficVerdict(siteId, now, tz) {
   const hourStart = now - 3600e3;
   const cur = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(siteId, hourStart, now).v;
   const hist = [];
   for (let d = 1; d <= 14; d++) {
-    const s0 = hourStart - d * 864e5;
+    const s0 = TZ.sameLocalTime(tz || 'UTC', hourStart, d);
     hist.push(db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(siteId, s0, s0 + 3600e3).v);
   }
   const base = median(hist);
@@ -1295,7 +1303,7 @@ async function alertTick(now = Date.now()) {
     const rules = db.prepare('SELECT * FROM alerts WHERE site_id = ? AND enabled = 1').all(site.id);
     const hasOwn = db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n > 0;
     let verdict = null;
-    const traffic = () => verdict || (verdict = trafficVerdict(site.id, now));
+    const traffic = () => verdict || (verdict = trafficVerdict(site.id, now, site.timezone));
     const msgFor = (kind, v) => kind === 'spike'
       ? `🚀 **${site.domain}** traffic spike: **${v.cur}** visitors in the last hour (usually ~${v.base})`
       : `📉 **${site.domain}** traffic drop: **${v.cur}** visitors in the last hour (usually ~${v.base}) — tracker offline?`;
@@ -1334,6 +1342,7 @@ async function alertTick(now = Date.now()) {
 if (process.env.TACILYTICS_ALERT_TICK !== 'off') setInterval(() => { alertTick().catch((e) => console.error('alerts:', e.message)); }, 10 * 60000).unref();
 // test hook: run one evaluation on demand (only with the server API_KEY, only when enabled explicitly)
 if (process.env.TACILYTICS_TEST_HOOKS === '1') {
+  app.post('/api/_test/digest', requireRole('owner'), (req, res) => res.json(digestBody(Number((req.body || {}).now) || Date.now())));
   app.post('/api/_test/alert-tick', requireRole('owner'), async (req, res) => res.json(await alertTick(Number((req.body || {}).now) || Date.now())));
 }
 

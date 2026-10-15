@@ -17,7 +17,7 @@ test('time zones: API', async (t) => {
   const DB_PATH = path.join(dir, 'analytics.db');
   const PORT = 45000 + Math.floor(Math.random() * 1000);
   const KEY = 'tz-' + crypto.randomBytes(4).toString('hex');
-  const ENV = { ...process.env, DB_PATH, PORT: String(PORT), DIGEST_WEBHOOK_URL: 'off', DATA_RETENTION_DAYS: '0', INGEST_SALT: 's', API_KEY: KEY, SESSION_SECRET: 'x', WEB_PASSWORD: 'tz-pass-12345', TRUST_PROXY: '0', TACILYTICS_ALERT_TICK: 'off' };
+  const ENV = { ...process.env, DB_PATH, PORT: String(PORT), DIGEST_WEBHOOK_URL: 'off', DATA_RETENTION_DAYS: '0', INGEST_SALT: 's', API_KEY: KEY, SESSION_SECRET: 'x', WEB_PASSWORD: 'tz-pass-12345', TRUST_PROXY: '0', TACILYTICS_ALERT_TICK: 'off', TACILYTICS_TEST_HOOKS: '1' };
   const proc = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env: ENV, stdio: ['ignore', 'ignore', 'pipe'] });
   t.after(async () => { proc.kill('SIGTERM'); await new Promise((r) => proc.on('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); });
   for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${PORT}/nyx.js`); break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
@@ -69,6 +69,13 @@ test('time zones: API', async (t) => {
   await t.test('UTC site unchanged', async () => {
     const j = await series(utc, 'from=2025-10-25&to=2025-10-27');
     assert.deepStrictEqual(byDay(j), { '2025-10-25': 5, '2025-10-26': 4, '2025-10-27': 0 });
+  });
+
+  await t.test('digest: yesterday per site in its own time zone', async () => {
+    // 27.10.2025 06:00 UTC: yesterday is 26.10. in Berlin (25 h, 5 views) and in UTC (3 views: 00:30, 01:30, 22:59 → +23:00 = 4)
+    const j = (await call('POST', '/api/_test/digest', { now: Date.parse('2025-10-27T06:00:00Z') })).j;
+    assert.match(j.content, /berlin\.test\*\* .* 5 views/);
+    assert.match(j.content, /utc\.test\*\* .* 4 views/);
   });
 
   await t.test('stored rows untouched', async () => {
