@@ -197,6 +197,15 @@
           '<div class="set-inline"><input id="totpPw" type="password" placeholder="Your password" autocomplete="current-password"><button class="btn ghost" id="newRecovery">New recovery codes</button><button class="btn ghost danger" id="totpOff">Turn off</button></div>'
         : '<p class="muted">Use any authenticator app (1Password, Google Authenticator, Authy, Bitwarden …).</p><div id="totpSetup"><button class="btn" id="totpStart">Set up</button></div>') +
       '</div>' +
+      '<div class="set-card"><h3>' + ico('i-eye') + 'Don\u2019t count my own visits</h3>' +
+      '<p class="muted">Open your site once with one of these links, in every browser and on every phone you use. That browser is then ignored on that site (stored in the browser, nothing on the server). The second link undoes it.</p>' +
+      (T().sites() || []).map(function (st) {
+        var d = 'https://' + st.domain + '/';
+        return '<div class="set-row"><span>' + esc(st.domain) + '</span>' +
+          '<a class="btn ghost mini" target="_blank" rel="noopener" href="' + esc(d + '?tacilytics=off') + '">Ignore this browser</a>' +
+          '<a class="btn ghost mini" target="_blank" rel="noopener" href="' + esc(d + '?tacilytics=on') + '">Count again</a></div>';
+      }).join('') +
+      '</div>' +
       '<div class="set-card"><h3>' + ico('i-shield') + 'Password</h3>' +
       '<div class="set-inline"><input id="pwOld" type="password" placeholder="Current password" autocomplete="current-password"><input id="pwNew" type="password" placeholder="New password (10+)" autocomplete="new-password"><button class="btn ghost" id="pwSave">Change</button></div>' +
       '<p class="muted small">Changing it signs you out on all other devices.</p></div>' +

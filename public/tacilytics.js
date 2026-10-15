@@ -7,6 +7,7 @@
      data-track-outbound   auto-record clicks on links to other domains as events
      data-track-404        record a "404" event when the page is an error page
                            (value = CSS selector that only exists on error pages, e.g. "body.is-act-error")
+     (own visits: open the site once with ?tacilytics=off to stop counting this browser, ?tacilytics=on to undo)
      data-track-search     record "Search" events: value = query-string parameter, e.g. "search"
                            (results counted via data-search-results selector, default ".product-box")
    Purchases: tacilytics('Purchase', { value: 49.90, currency: 'EUR', items: 3 }) on the thank-you page
@@ -23,6 +24,18 @@
       var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
       if (navigator.globalPrivacyControl === true || dnt === '1' || dnt === 'yes') return;
     }
+
+    // "Don't count this browser" (your own visits): open the site once with ?tacilytics=off
+    // (?tacilytics=on counts it again). Remembered per browser in localStorage, nothing is sent.
+    try {
+      var optParam = new URLSearchParams(location.search).get('tacilytics');
+      if (optParam === 'off') { localStorage.setItem('tacilytics_ignore', '1'); console.info('Tacilytics: this browser is no longer counted on ' + location.hostname + ' (undo: ?tacilytics=on)'); }
+      else if (optParam === 'on') { localStorage.removeItem('tacilytics_ignore'); console.info('Tacilytics: this browser is counted again on ' + location.hostname); }
+      if (localStorage.getItem('tacilytics_ignore') === '1') {
+        window.tacilytics = window.nyx = function () {}; // calls on the page keep working, silently
+        return;
+      }
+    } catch (e) {} // storage blocked → just count normally
 
     var endpoint = new URL(s.src).origin + '/api/collect';
     var tz = '';

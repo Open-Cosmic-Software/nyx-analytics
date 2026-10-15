@@ -452,3 +452,4 @@ select option { background: #0c1a1d; color: var(--text); }
 /* viewers: hide everything that would only answer with 403 */
 body.role-viewer #addSiteBtn, body.role-viewer #shareBtn, body.role-viewer #addFunnelBtn { display: none !important; }
 @media (max-width: 560px) { #meName { display: none; } .team-row { flex-wrap: wrap; } }
+a.btn, a.btn:hover { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; color: var(--text); }

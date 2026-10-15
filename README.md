@@ -114,6 +114,8 @@ Opt-in flags on the `<script>` tag:
         src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
+**Your own visits:** open your site once with `?tacilytics=off` (e.g. `https://example.com/?tacilytics=off`) and that browser is no longer counted on that site. `?tacilytics=on` undoes it. It is stored in the browser's localStorage, nothing is sent; repeat it on every browser and phone you use. Settings → Security has the links for all your sites.
+
 ## Mobile & desktop apps
 
 Track your **native app in the same dashboard as your website**. Every row gets a platform
