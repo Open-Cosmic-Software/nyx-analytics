@@ -189,6 +189,10 @@ tacilytics sites
 tacilytics stats example.com 30d
 tacilytics live example.com --watch
 tacilytics add example.com
+
+# on the server itself (reads the database, no API key)
+tacilytics users
+tacilytics reset-login <username>
 ```
 
 Add `--json` to any command for machine-readable output — perfect for agents and scripts.
@@ -206,13 +210,36 @@ counts unique visitors *per day* and can’t follow the same person across days 
 devices. You get the 95 % that matters (how many, which pages, from where) with 0 %
 cookie banner — the same approach as Plausible/Fathom.
 
+## Team, 2FA & passkeys
+
+Out of the box the dashboard opens with one shared passphrase (`WEB_PASSWORD`). When you want more:
+
+1. Sign in, open **Settings → Security** and create your **owner account**. From then on `WEB_PASSWORD` no longer opens anything, so nobody can walk around your 2FA with it.
+2. **Settings → Team → Invite someone** creates a link that works **once, for 7 days**. Send it yourself; Tacilytics sends no e-mail.
+
+| Role | Can |
+|---|---|
+| **Owner** | everything, including the team |
+| **Admin** | add/remove sites, share links, funnels |
+| **Viewer** | read only — optionally limited to **specific sites** |
+
+Everyone can turn on, **optionally**:
+
+- **Passkeys** (Face ID, Touch ID, Windows Hello, security keys). A passkey replaces password *and* code and cannot be phished.
+- **One-time codes (TOTP)** from any authenticator app, with 10 single-use **recovery codes**. Codes cannot be reused.
+
+**Locked out?** On the server: `tacilytics users` lists accounts, `tacilytics reset-login <username>` prints a new password, turns 2FA off and ends that person's sessions. An owner can also reset a teammate's 2FA in Settings → Team.
+
+The API key (`API_KEY`, Bearer) keeps owner rights for agents and the CLI.
+
 ## Configuration
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `PORT` | `3920` | Port (bound to 127.0.0.1) |
-| `WEB_PASSWORD` | `tacilytics` | Dashboard passphrase |
-| `SESSION_SECRET` | random | Session-token secret |
+| `WEB_PASSWORD` | `tacilytics` | Dashboard passphrase — **only until the first account exists** |
+| `TACILYTICS_ORIGIN` | request host | Public URL of the dashboard, e.g. `https://analytics.example.com`. Pins the passkey domain; recommended behind a proxy |
+| `TRUST_PROXY` | `1` | Number of reverse proxies in front of Tacilytics (e.g. Cloudflare + Caddy = `2`). Rate limits **and visitor hashes** use the address the outermost trusted proxy saw, never the client-written first `X-Forwarded-For` entry. Too low: with two proxies and `1`, every visitor looks like the Cloudflare address and unique visitors collapse. Too high: clients can pick their own address and bypass the limits. Tacilytics binds to 127.0.0.1, so a proxy is always in front and `0` is almost always wrong (everyone becomes 127.0.0.1) |
 | `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
@@ -228,7 +255,9 @@ cookie banner — the same approach as Plausible/Fathom.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
 - Custom event properties are capped (scalars only, size-limited) so they can’t become a PII dumping ground.
-- Timing-safe auth; login and the collect endpoint are rate-limited.
+- Passwords hashed with scrypt; session tokens, invite links and recovery codes are stored only as SHA-256. Sessions live in the database (survive restarts, expire after 30 days).
+- Timing-safe auth; login (per IP and per account), the 2FA step and the collect endpoint are rate-limited. Unknown usernames take as long as wrong passwords.
+- Every per-site endpoint checks access: share links see exactly their site, viewers only the sites they were given.
 - All visitor-supplied values are HTML-escaped before they reach the DOM.
 - Run behind TLS; keep `.env` at `chmod 600`.
 

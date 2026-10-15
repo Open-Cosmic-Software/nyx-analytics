@@ -137,6 +137,37 @@ async function cmdAdd() {
   console.log('  ' + cyan(`<script defer data-domain="${s.domain}" src="${URL_BASE}/tacilytics.js"></script>`));
 }
 
+// ── offline admin: opens the same SQLite file the server uses (same .env + DB_PATH rules) ──
+function cmdLocalAdmin() {
+  const fs = require('fs'), path = require('path');
+  for (const dir of [...new Set([process.cwd(), __dirname])]) {
+    try {
+      for (const line of fs.readFileSync(path.join(dir, '.env'), 'utf8').split('\n')) {
+        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+        if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+      }
+    } catch {}
+  }
+  const inside = __dirname.split(path.sep).includes('node_modules');
+  const dbPath = process.env.DB_PATH || path.join(inside ? process.cwd() : __dirname, 'data', 'analytics.db');
+  if (!fs.existsSync(dbPath)) die('No database at ' + dbPath + ' (set DB_PATH).');
+  const db = new (require('better-sqlite3'))(dbPath);
+  const ops = require('./auth').adminOps(db);
+  if (cmd === 'users') {
+    const rows = ops.list();
+    if (JSON_OUT) return console.log(JSON.stringify(rows, null, 2));
+    if (!rows.length) return console.log(dim('No accounts yet — the dashboard still uses WEB_PASSWORD.'));
+    for (const u of rows) console.log(`  ${pad(u.username, 24)} ${pad(u.role, 7)} ${u.totp ? green('2FA') : dim('no 2FA')}  ${dim(u.last_login ? 'last login ' + new Date(u.last_login).toISOString().slice(0, 16).replace('T', ' ') : 'never signed in')}`);
+    return;
+  }
+  const name = pos[1];
+  if (!name) die('Usage: tacilytics reset-login <username>');
+  const pw = ops.reset(name);
+  console.log(green('✔ ') + `${name}: 2FA turned off, all sessions ended. Passkeys stay registered.`);
+  console.log('New password: ' + pw);
+  console.log(dim('Sign in with it, then change it and turn 2FA on again under Settings → Security.'));
+}
+
 function help() {
   console.log(`
 ${pink('Tacilytics CLI')}
@@ -148,6 +179,10 @@ ${bold('Usage')}  tacilytics <command> [--json] [--watch]
   ${cyan('stats')} <domain> [period]   key metrics + breakdowns (today|7d|30d|90d|12mo)
   ${cyan('live')} <domain> [--watch]   online visitors + last-30-min feed
   ${cyan('add')} <domain>              add a site, print the embed snippet
+
+${bold('On the server')} (reads the database directly, no API key)
+  ${cyan('users')}                     list accounts
+  ${cyan('reset-login')} <username>    locked out? new password, 2FA off, sessions ended
 
 ${bold('Segment & range')} (on stats)
   ${dim('--country=DE --source=… --page=… --browser=… --medium=… --campaign=… --goal=…')}
@@ -164,6 +199,7 @@ ${dim('Add --json for machine-readable output (agents).')}
 (async () => {
   try {
     if (cmd === 'serve' || cmd === 'start') { require('./server.js'); return; }
+    if (cmd === 'users' || cmd === 'reset-login') return cmdLocalAdmin();
     if (cmd === 'sites') await cmdSites();
     else if (cmd === 'stats') await cmdStats();
     else if (cmd === 'live' || cmd === 'realtime') await cmdLive();
