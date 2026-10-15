@@ -101,6 +101,16 @@ db.exec(`
     steps TEXT NOT NULL, -- JSON array of {type:'page'|'goal', value}
     created INTEGER NOT NULL
   );
+  -- chart annotations ("Newsletter sent", "Release 2.0") — one calendar day each
+  CREATE TABLE IF NOT EXISTS annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL,
+    day TEXT NOT NULL,          -- YYYY-MM-DD (UTC, like events.day)
+    text TEXT NOT NULL,
+    created_by TEXT,
+    created INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_annotations_site_day ON annotations(site_id, day);
 `);
 
 const norm = (d) => String(d || '').toLowerCase().replace(/^www\./, '').replace(/\/.*$/, '').trim();
@@ -386,7 +396,9 @@ app.get('/api/sites', auth, sitesListHandler);
 app.post('/api/sites', adminOnly, sitesCreateHandler);
 app.delete('/api/sites/:id', adminOnly, (req, res) => {
   const id = Number(req.params.id);
+  if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
+  db.prepare('DELETE FROM annotations WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -639,6 +651,8 @@ function statsHandler(req, res) {
     yoy,
     dataSince: firstTs ? new Date(firstTs).toISOString().slice(0, 10) : null,
     series,
+    annotations: db.prepare('SELECT id, day, text, created_by FROM annotations WHERE site_id = ? AND day >= ? AND day <= ? ORDER BY day, id')
+      .all(sid, new Date(start).toISOString().slice(0, 10), new Date(end - 1).toISOString().slice(0, 10)),
     pages: topBy('path', 10),
     entryPages: edge('ASC', 8),
     exitPages: edge('DESC', 8),
@@ -698,6 +712,8 @@ app.post('/api/shares', adminOnly, (req, res) => {
   res.json({ token, domain: site.domain, url: '/share/' + token });
 });
 app.delete('/api/shares/:token', adminOnly, (req, res) => {
+  const sh = getShare.get(String(req.params.token));
+  if (sh && !siteAllowed(req, sh.site_id)) return res.status(403).json(NO_SITE);
   db.prepare('DELETE FROM shares WHERE token = ?').run(String(req.params.token));
   res.json({ ok: true });
 });
@@ -707,6 +723,36 @@ app.get('/api/share-info/:token', (req, res) => {
   if (!sh) return res.status(404).json({ error: 'Unknown or revoked share link' });
   const site = db.prepare('SELECT domain, name FROM sites WHERE id = ?').get(sh.site_id);
   res.json({ domain: site.domain, name: site.name });
+});
+
+// ── chart annotations: list for a site (any reader of the site), add/remove (admin) ──
+app.get('/api/annotations', authOrShare, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  res.json(db.prepare('SELECT id, day, text, created_by, created FROM annotations WHERE site_id = ? ORDER BY day DESC, id DESC LIMIT 500').all(site.id));
+});
+app.post('/api/annotations', adminOnly, (req, res) => {
+  const b = req.body || {};
+  const site = getSiteByDomain.get(norm(b.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  const day = String(b.day || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || isNaN(Date.parse(day + 'T00:00:00Z')) || new Date(day + 'T00:00:00Z').toISOString().slice(0, 10) !== day) {
+    return res.status(400).json({ error: 'day must be a date like 2026-10-15' });
+  }
+  const text = String(b.text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  if (!text) return res.status(400).json({ error: 'Write a short note' });
+  const by = req.principal && req.principal.user ? req.principal.user.username : (req.principal && req.principal.kind === 'apikey' ? 'API' : null);
+  const info = db.prepare('INSERT INTO annotations (site_id, day, text, created_by, created) VALUES (?, ?, ?, ?, ?)').run(site.id, day, text, by, Date.now());
+  res.json({ id: info.lastInsertRowid, day, text, created_by: by });
+});
+app.delete('/api/annotations/:id', adminOnly, (req, res) => {
+  const a = db.prepare('SELECT * FROM annotations WHERE id = ?').get(Number(req.params.id));
+  if (!a) return res.json({ ok: true });
+  if (!siteAllowed(req, a.site_id)) return res.status(403).json(NO_SITE);
+  db.prepare('DELETE FROM annotations WHERE id = ?').run(a.id);
+  res.json({ ok: true });
 });
 
 // ── funnels: ordered steps (pages or goals), conversion measured per visitor in-range ──
@@ -734,6 +780,8 @@ app.post('/api/funnels', adminOnly, (req, res) => {
   res.json({ id: info.lastInsertRowid, name, steps });
 });
 app.delete('/api/funnels/:id', adminOnly, (req, res) => {
+  const f = db.prepare('SELECT site_id FROM funnels WHERE id = ?').get(Number(req.params.id));
+  if (f && !siteAllowed(req, f.site_id)) return res.status(403).json(NO_SITE);
   db.prepare('DELETE FROM funnels WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });

@@ -155,6 +155,10 @@ The server hashes the launch id with a random daily salt that is deleted when th
 Without `sid`, the usual IP + user-agent daily hash is used. Region comes from the timezone or
 device locale, never from IP geolocation.
 
+## Notes in the chart
+
+Click **Notes** in the chart legend to mark a day — a newsletter, a release, a sale. A coral line and a diamond appear on that day, the note shows in the tooltip, and everyone with access to the site (including share links) sees it. Admins and owners add and remove notes. `GET /api/annotations?site=…` lists them; `/stats` returns the ones in its range as `annotations`.
+
 ## Live visitors
 
 Click **“● online now”** for a realtime view: a 30-minute pulse and a live feed of

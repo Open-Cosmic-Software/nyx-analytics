@@ -360,6 +360,23 @@
       '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6" vector-effect="non-scaling-stroke" opacity=".9"/></svg>';
     card.insertAdjacentHTML('beforeend', svg);
   }
+  // ── chart annotations: a thin coral line + diamond per annotated day (daily views only) ──
+  function annotationsFor(d) {
+    var list = (lastStats && lastStats.annotations) || [];
+    return d && d.day ? list.filter(function (a) { return a.day === d.day; }) : [];
+  }
+  function annotationMarks(series, x, H) {
+    var list = (lastStats && lastStats.annotations) || [];
+    if (!list.length) return '';
+    var out = '';
+    series.forEach(function (d, i) {
+      if (!annotationsFor(d).length) return;
+      var cx = x(i).toFixed(1);
+      out += '<line x1="' + cx + '" x2="' + cx + '" y1="14" y2="' + H + '" stroke="var(--accent-2, #ff7a5c)" stroke-width="1.2" stroke-dasharray="3 4" opacity=".75" vector-effect="non-scaling-stroke"/>' +
+        '<path d="M' + cx + ' 3 l5 6 l-5 6 l-5 -6 z" fill="var(--accent-2, #ff7a5c)"/>';
+    });
+    return out;
+  }
   function drawChart(series) {
     var svg = $('chart'); var W = 800, H = 220, pad = 8;
     var showV = state.show.visitors, showP = state.show.pageviews;
@@ -386,19 +403,46 @@
       (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.85"/>' : '') +
       (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2.4" stroke-linecap="round"/>' : '') +
       (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="#071114" stroke-width="1.5"/>'; }).join('') : '') +
+      annotationMarks(series, x, H) +
       hovers;
     var tip = $('tip');
     Array.prototype.forEach.call(svg.querySelectorAll('rect'), function (rect) {
       rect.addEventListener('mousemove', function (e) {
         var d = series[+rect.dataset.i];
+        var notes = annotationsFor(d);
         tip.innerHTML = '<strong>' + esc(d.label) + '</strong>' +
           (showV ? '<br>' + d.visitors + ' visitors' : '') +
-          (showP ? '<br>' + d.pageviews + ' views' : '');
+          (showP ? '<br>' + d.pageviews + ' views' : '') +
+          notes.map(function (a) { return '<br><span class="tip-note">◆ ' + esc(a.text) + '</span>'; }).join('');
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
       rect.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
     });
   }
+
+  // ── add / list annotations ──
+  function openAnnotations() {
+    $('annModal').classList.remove('hide'); $('annErr').textContent = '';
+    $('annDay').value = new Date().toISOString().slice(0, 10); $('annText').value = ''; $('annText').focus();
+    api('/api/annotations?site=' + encodeURIComponent(state.site)).then(function (list) {
+      $('annList').innerHTML = (list || []).length ? list.map(function (a) {
+        return '<div class="set-row"><span><strong>' + esc(a.day) + '</strong> ' + esc(a.text) + (a.created_by ? ' <span class="muted small">· ' + esc(a.created_by) + '</span>' : '') + '</span>' +
+          '<button class="btn ghost danger mini" data-delann="' + a.id + '">Remove</button></div>';
+      }).join('') : '<p class="muted small">No notes yet.</p>';
+      $('annList').querySelectorAll('[data-delann]').forEach(function (b) {
+        b.onclick = function () { api('/api/annotations/' + b.dataset.delann, { method: 'DELETE' }).then(function () { openAnnotations(); load(); }); };
+      });
+    });
+  }
+  $('annBtn').onclick = openAnnotations;
+  $('closeAnn').onclick = function () { $('annModal').classList.add('hide'); };
+  $('saveAnn').onclick = function () {
+    api('/api/annotations', { method: 'POST', body: JSON.stringify({ site: state.site, day: $('annDay').value, text: $('annText').value }) }).then(function (r) {
+      if (r.error) { $('annErr').textContent = r.error; return; }
+      openAnnotations(); load();
+    });
+  };
+  $('annText').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('saveAnn').click(); });
 
   // ── tab-aware panels (Pages: Top/Entry/Exit · Sources: Source/Medium/Campaign) ──
   function renderPagesPanel() {
@@ -770,7 +814,7 @@
       state.site = info.domain;
       var sel = $('siteSelect');
       sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
-      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
       syncLegend();
       load();
       clearInterval(window.__rt);

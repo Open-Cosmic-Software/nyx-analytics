@@ -126,6 +126,7 @@
         <div class="legend">
           <button type="button" class="leg" id="leg-visitors" data-key="visitors" aria-pressed="true"><span class="swatch" style="background:var(--chart-visitors)"></span>Visitors</button>
           <button type="button" class="leg" id="leg-pageviews" data-key="pageviews" aria-pressed="true"><span class="swatch" style="background:var(--chart-pageviews)"></span>Pageviews</button>
+          <button type="button" class="leg" id="annBtn" title="Mark a day in the chart, e.g. a newsletter or a release"><span class="swatch ann"></span>Notes</button>
         </div>
       </div>
       <svg id="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
@@ -272,6 +273,18 @@
   </div>
 </div>
 
+<!-- Chart annotations -->
+<div id="annModal" class="modal-overlay hide">
+  <div class="modal modal-wide settings">
+    <h2>Notes in the chart</h2>
+    <p>Mark a day — a newsletter, a release, a sale — so a spike explains itself later. Everyone with access to this site sees them.</p>
+    <div id="annErr" class="err" role="alert"></div>
+    <div class="set-inline"><input id="annDay" type="date" style="flex:0 0 170px;color-scheme:dark"><input id="annText" type="text" maxlength="140" placeholder="e.g. Newsletter sent"><button class="btn" id="saveAnn">Add</button></div>
+    <div id="annList" style="margin-top:14px"></div>
+    <button class="btn ghost" id="closeAnn" style="margin-top:16px">Close</button>
+  </div>
+</div>
+
 <!-- Settings: account, security, team -->
 <div id="settingsModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
@@ -290,7 +303,7 @@
 </div>
 
 <div class="tip" id="tip"></div>
-<script src="/account.js?v=2.1.1"></script>
-<script src="/app.js?v=2.3.1"></script>
+<script src="/account.js?v=2.2.0"></script>
+<script src="/app.js?v=2.4.0"></script>
 </body>
 </html>

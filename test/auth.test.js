@@ -281,6 +281,36 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
   r = await call('POST', '/auth/passkey/verify', { body: { ticket: r.j.ticket, response: stranger.get(r.j.options, ORIGIN) } });
   await t.test('unknown passkey is rejected', () => assert.strictEqual(r.status, 401));
 
+  // chart annotations
+  r = await call('POST', '/api/annotations', { token: admin, body: { site: 'a.test', day: '2026-10-15', text: '  Newsletter   sent  ' } });
+  const annId = r.j.id;
+  await t.test('admin adds an annotation (whitespace tidied, author kept)', () => { assert.strictEqual(r.j.text, 'Newsletter sent'); assert.strictEqual(r.j.created_by, 'adam'); });
+  await t.test('annotation: bad day or empty text rejected', async () => {
+    assert.strictEqual((await call('POST', '/api/annotations', { token: admin, body: { site: 'a.test', day: '2026-02-30', text: 'x' } })).status, 400);
+    assert.strictEqual((await call('POST', '/api/annotations', { token: admin, body: { site: 'a.test', day: '15.10.2026', text: 'x' } })).status, 400);
+    assert.strictEqual((await call('POST', '/api/annotations', { token: admin, body: { site: 'a.test', day: '2026-10-15', text: '   ' } })).status, 400);
+  });
+  await t.test('viewer reads annotations of own site, cannot add, cannot read others', async () => {
+    assert.strictEqual((await call('GET', '/api/annotations?site=a.test', { token: viewer })).j[0].text, 'Newsletter sent');
+    assert.strictEqual((await call('POST', '/api/annotations', { token: viewer, body: { site: 'a.test', day: '2026-10-15', text: 'x' } })).status, 403);
+    assert.strictEqual((await call('GET', '/api/annotations?site=b.test', { token: viewer })).status, 403);
+  });
+  await t.test('stats carry the annotations of the range', async () => {
+    const st = (await call('GET', '/api/stats?site=a.test&from=2026-10-01&to=2026-10-31', { token: viewer })).j;
+    assert.deepStrictEqual(st.annotations.map((a) => a.text), ['Newsletter sent']);
+    const other = (await call('GET', '/api/stats?site=a.test&from=2026-09-01&to=2026-09-30', { token: viewer })).j;
+    assert.deepStrictEqual(other.annotations, []);
+  });
+  {
+    const sh = (await call('POST', '/api/shares', { token: admin, body: { site: 'a.test' } })).j.token;
+    await t.test('share link sees annotations of its site only', async () => {
+      assert.strictEqual((await call('GET', '/api/annotations?site=a.test&share=' + sh)).status, 200);
+      assert.strictEqual((await call('GET', '/api/annotations?site=b.test&share=' + sh)).status, 403);
+    });
+  }
+  await call('DELETE', '/api/annotations/' + annId, { token: admin });
+  await t.test('annotation removed', async () => assert.deepStrictEqual((await call('GET', '/api/annotations?site=a.test', { token: viewer })).j, []));
+
   // password reset link (owner → teammate)
   const veraId = (await call('GET', '/api/team', { token: owner })).j.users.find((u) => u.username === 'vera').id;
   r = await call('POST', `/api/team/users/${veraId}/reset-link`, { token: viewer });
