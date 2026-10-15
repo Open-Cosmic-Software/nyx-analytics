@@ -326,35 +326,16 @@ app.options('/api/collect', (_req, res) => { res.set('Access-Control-Allow-Origi
 app.post('/api/collect', collect);
 app.get('/api/collect', collect);
 
-// ── auth (password → in-memory session token) ──────────────
-const sessions = new Map();
-function newToken() { return crypto.randomBytes(24).toString('hex'); }
-app.post('/auth/login', (req, res) => {
-  if (rateLimited('login:' + clientIp(req), 10, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
-  const pw = String((req.body && req.body.password) || '');
-  const ok = pw.length === WEB_PASSWORD.length && crypto.timingSafeEqual(Buffer.from(pw), Buffer.from(WEB_PASSWORD));
-  if (!ok) return res.status(401).json({ error: 'Wrong password' });
-  const token = newToken();
-  sessions.set(token, { expires: Date.now() + 7 * 864e5 });
-  res.json({ token });
+// ── auth: accounts, team, optional 2FA + passkeys (auth.js) ───────────────────
+const { setupAuth } = require('./auth');
+const { auth, requireRole, siteAllowed } = setupAuth({
+  app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp,
+  allSiteIds: () => db.prepare('SELECT id FROM sites').all().map((r) => r.id),
 });
-function checkApiKey(req) {
-  if (!API_KEY) return false;
-  const hdr = String(req.headers['authorization'] || '');
-  const key = hdr.startsWith('Bearer ') ? hdr.slice(7) : String(req.headers['x-api-key'] || '');
-  return key.length === API_KEY.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(API_KEY));
-}
-function auth(req, res, next) {
-  if (checkApiKey(req)) return next(); // agents / CLI
-  const t = req.headers['x-session-token'];
-  const s = t && sessions.get(t);
-  if (s && s.expires > Date.now()) return next();
-  if (s) sessions.delete(t);
-  res.status(401).json({ error: 'Not authenticated' });
-}
+const adminOnly = requireRole('admin');
 
 // share-token auth: read-only stats access scoped to exactly one site.
-// Accepted as ?share=<token>; the handler must verify req.shareSite matches the queried site.
+// Accepted as ?share=<token>; the handler must check siteOk(req, site).
 const getShare = db.prepare('SELECT * FROM shares WHERE token = ?');
 function authOrShare(req, res, next) {
   const tok = String(req.query.share || '');
@@ -364,10 +345,13 @@ function authOrShare(req, res, next) {
   }
   return auth(req, res, next);
 }
-function shareScopeOk(req, site) { return req.shareSiteId == null || req.shareSiteId === site.id; }
+// share links see exactly their site; viewers only the sites they were given
+const siteOk = (req, site) => siteAllowed(req, site.id);
+const NO_SITE = { error: 'You have no access to this site' };
+function newToken() { return crypto.randomBytes(24).toString('hex'); }
 
 // ── sites management ─────────────────────────────────────────────────────────
-const sitesListHandler = (_req, res) => res.json(allSites.all());
+const sitesListHandler = (req, res) => res.json(allSites.all().filter((st) => siteAllowed(req, st.id)));
 const sitesCreateHandler = (req, res) => {
   const rawDomain = norm(req.body && req.body.domain);
   let domain = rawDomain;
@@ -382,8 +366,8 @@ const sitesCreateHandler = (req, res) => {
   res.json(getSiteByDomain.get(domain));
 };
 app.get('/api/sites', auth, sitesListHandler);
-app.post('/api/sites', auth, sitesCreateHandler);
-app.delete('/api/sites/:id', auth, (req, res) => {
+app.post('/api/sites', adminOnly, sitesCreateHandler);
+app.delete('/api/sites/:id', adminOnly, (req, res) => {
   const id = Number(req.params.id);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
@@ -403,7 +387,7 @@ app.get('/api/v1', (_req, res) => res.json({
   filters: 'add any of country,source,page,browser,os,device,lang,medium,campaign,goal to /stats to segment',
 }));
 app.get('/api/v1/sites', auth, sitesListHandler);
-app.post('/api/v1/sites', auth, sitesCreateHandler);
+app.post('/api/v1/sites', adminOnly, sitesCreateHandler);
 
 // ── stats ────────────────────────────────────────────────────────────────────
 const PERIODS = { today: 1, '7d': 7, '30d': 30, '90d': 90, '12mo': 365 };
@@ -452,7 +436,7 @@ function eventPlatformFilter(query) {
 function statsHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
-  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const sid = site.id;
   const { start, end, days, period, hourly } = rangeFor(req.query);
   const { clauses, params, goal } = buildFilters(req.query);
@@ -669,7 +653,7 @@ app.get('/api/v1/stats', authOrShare, statsHandler);
 function realtimeHandler(req, res) {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
-  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const sid = site.id, now = Date.now(), since = now - 30 * 60000;
   const online = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ?').get(sid, now - 5 * 60000).v;
   const rows = db.prepare('SELECT CAST((ts/60000) AS INT) b, COUNT(*) pv, COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND name IS NULL AND ts >= ? GROUP BY b').all(sid, since);
@@ -683,18 +667,20 @@ app.get('/api/realtime', authOrShare, realtimeHandler);
 app.get('/api/v1/realtime', authOrShare, realtimeHandler);
 
 // ── share links: create / list / revoke (owner only) + resolve (public) ──────────
-app.get('/api/shares', auth, (req, res) => {
-  const rows = db.prepare('SELECT s.token, s.created, st.domain FROM shares s JOIN sites st ON st.id = s.site_id ORDER BY s.created DESC').all();
+app.get('/api/shares', adminOnly, (req, res) => {
+  const rows = db.prepare('SELECT s.token, s.created, s.site_id, st.domain FROM shares s JOIN sites st ON st.id = s.site_id ORDER BY s.created DESC').all()
+    .filter((r) => siteAllowed(req, r.site_id)).map(({ site_id, ...r }) => r);
   res.json(rows);
 });
-app.post('/api/shares', auth, (req, res) => {
+app.post('/api/shares', adminOnly, (req, res) => {
   const site = getSiteByDomain.get(norm(req.body && req.body.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const token = newToken();
   db.prepare('INSERT INTO shares (token, site_id, created) VALUES (?, ?, ?)').run(token, site.id, Date.now());
   res.json({ token, domain: site.domain, url: '/share/' + token });
 });
-app.delete('/api/shares/:token', auth, (req, res) => {
+app.delete('/api/shares/:token', adminOnly, (req, res) => {
   db.prepare('DELETE FROM shares WHERE token = ?').run(String(req.params.token));
   res.json({ ok: true });
 });
@@ -710,11 +696,13 @@ app.get('/api/share-info/:token', (req, res) => {
 app.get('/api/funnels', auth, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   res.json(db.prepare('SELECT id, name, steps, created FROM funnels WHERE site_id = ? ORDER BY id').all(site.id).map((f) => ({ ...f, steps: JSON.parse(f.steps) })));
 });
-app.post('/api/funnels', auth, (req, res) => {
+app.post('/api/funnels', adminOnly, (req, res) => {
   const site = getSiteByDomain.get(norm(req.body && req.body.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const name = String((req.body && req.body.name) || '').slice(0, 80).trim();
   const raw = (req.body && req.body.steps) || [];
   if (!name) return res.status(400).json({ error: 'Funnel needs a name' });
@@ -728,7 +716,7 @@ app.post('/api/funnels', auth, (req, res) => {
   const info = db.prepare('INSERT INTO funnels (site_id, name, steps, created) VALUES (?, ?, ?, ?)').run(site.id, name, JSON.stringify(steps), Date.now());
   res.json({ id: info.lastInsertRowid, name, steps });
 });
-app.delete('/api/funnels/:id', auth, (req, res) => {
+app.delete('/api/funnels/:id', adminOnly, (req, res) => {
   db.prepare('DELETE FROM funnels WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
@@ -737,7 +725,7 @@ app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
   const f = db.prepare('SELECT * FROM funnels WHERE id = ?').get(Number(req.params.id));
   if (!f) return res.status(404).json({ error: 'Unknown funnel' });
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(f.site_id);
-  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const { start, end } = rangeFor(req.query);
   const steps = JSON.parse(f.steps);
   // one pass per visitor: fetch matching events sorted by time, walk the step ladder.
@@ -771,7 +759,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/journeys', authOrShare, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
-  if (!shareScopeOk(req, site)) return res.status(403).json({ error: 'Share link is limited to another site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const { start, end } = rangeFor(req.query);
   const maxDepth = Math.min(5, Math.max(2, parseInt(req.query.depth, 10) || 4));
   const GAP = 30 * 60000;
