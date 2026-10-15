@@ -4,9 +4,9 @@
 
    Optional data-* flags on the <script> tag:
      data-honor-dnt        respect Do-Not-Track / Global Privacy Control (skip all tracking)
-     data-strict           strict mode: read nothing from the visitor's device beyond what the browser sends
-                           with every request anyway (no localStorage, no timezone, no language, no screen/
-                           scroll size, no DNT lookup in JS). Language comes from the Accept-Language header,
+     data-strict           strict mode: no localStorage, no timezone, no language, no window/screen size,
+                           no DNT lookup in JS (only document.visibilityState and Date.now() differences for
+                           time on page, never sent). Language comes from the Accept-Language header,
                            DNT/GPC from the request headers (with data-honor-dnt). Costs: no country, no scroll
                            depth, ?tacilytics=off does not work (exclude own visits another way).
      data-track-outbound   auto-record clicks on links to other domains as events

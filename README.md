@@ -22,7 +22,7 @@
 
 ## Why Tacilytics
 
-- 🍪 **Cookieless.** No cookies, no IDs, nothing written to the visitor's device, no fingerprinting. Need to stay clear of device access rules (ePrivacy / § 25 TDDDG) entirely? **Strict mode** (`data-strict`) reads nothing from the device either — see [Strict mode](#strict-mode).
+- 🍪 **Cookieless.** No cookies, no IDs, nothing written to the visitor's device, no fingerprinting. **Strict mode** (`data-strict`) also reduces what the tracker reads on the device to what every page request carries anyway — see [Strict mode](#strict-mode).
 - 🛡️ **IPs are never stored.** Unique visitors are counted with a *daily, salted, one-way hash* that’s irreversible and rotated every day.
 - 🌍 **Region from the browser timezone**, never from IP geolocation.
 - 🔍 **Segment everything.** Click any country, page, source, browser or campaign to filter the whole dashboard — stacked, with one-click chips.
@@ -72,7 +72,7 @@ Open the dashboard, log in, click **+ Add site**, and drop the snippet into your
 <script defer data-domain="example.com" src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
-That’s it. Pageviews start flowing in, without cookies. (Want to read nothing from the device either? Add `data-strict`, see [Strict mode](#strict-mode).)
+That’s it. Pageviews start flowing in, without cookies. (Want the tracker to read less on the device as well? Add `data-strict`, see [Strict mode](#strict-mode).)
 
 ## Custom events, goals & properties
 
@@ -110,7 +110,7 @@ Opt-in flags on the `<script>` tag:
 ```html
 <script defer data-domain="example.com"
         data-honor-dnt          <!-- skip tracking if DNT / Global Privacy Control is on -->
-        data-strict             <!-- read nothing from the device (see Strict mode) -->
+        data-strict             <!-- reduce device reads (see Strict mode) -->
         data-track-outbound     <!-- auto-record clicks to other domains as events -->
         data-track-downloads    <!-- auto-record file downloads (pdf, zip, docx …) as "File Download"; or ="pdf,epub" -->
         src="https://analytics.example.com/tacilytics.js"></script>
@@ -118,15 +118,17 @@ Opt-in flags on the `<script>` tag:
 
 ### Strict mode
 
-The default tracker writes nothing to the visitor's device, but it does **read** a few things there: one `localStorage` flag (your own visits, below), the time zone (→ country), the browser language, the window size (→ scroll depth) and, with `data-honor-dnt`, the DNT/GPC setting. EU device-access rules (ePrivacy Art. 5(3), in Germany § 25 TDDDG) cover reading as well as storing, and authorities do not all agree whether such reads are "strictly necessary". If you want to stay clear of that question, add `data-strict`:
+The default tracker writes nothing to the visitor's device, but it does **read** a few things there: one `localStorage` flag (your own visits, below), the time zone (→ country), the browser language, the window size (→ scroll depth) and, with `data-honor-dnt`, the DNT/GPC setting. EU device-access rules (ePrivacy Art. 5(3), in Germany § 25 TDDDG) cover reading as well as storing, and the EDPB reads "access" broadly (Guidelines 2/2023 also count information a script makes the browser send). Strict mode reduces device access to what every page request carries anyway:
 
 ```html
 <script defer data-domain="example.com" data-strict data-honor-dnt src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
-In strict mode the tracker reads nothing from the device. It only sends what the page itself knows (domain, path, referrer, UTM parameters) and the browser sends the usual request headers anyway. The server takes the language from `Accept-Language`, and with `data-honor-dnt` it checks the `DNT` / `Sec-GPC` request headers. A test runs the tracker with every device API booby-trapped and fails if strict mode touches one.
+In strict mode the tracker does not read local storage, the time zone, the language, the window or screen size, or the DNT/GPC setting. It sends what the page itself knows (domain, path, `document.referrer`, UTM parameters), and the browser adds its usual request headers. The server takes the language from `Accept-Language`, and with `data-honor-dnt` it checks the `DNT` / `Sec-GPC` request headers. Two things are still used for timing and never sent: the page's visibility state (`document.visibilityState`) and the device clock (`Date.now()`, only differences, for time on page). A test runs the tracker with every other device API booby-trapped and fails if strict mode touches one.
 
-What you give up: **no country** (it came from the time zone), **no scroll depth** (time on page stays), and `?tacilytics=off` does not work — exclude your own visits another way (e.g. a test browser you don't count, or filter yourself out in the dashboard). This is not legal advice; whether you need consent also depends on the rest of your website.
+**WordPress plugin:** its role exclusion (don't count logged-in admins, editors …) uses a `localStorage` marker in a small inline script before the tracker. Turn the role exclusion off when you use strict mode; a later plugin release will handle it on the server.
+
+What you give up: **no country** (it came from the time zone), **no scroll depth** (time on page stays), and `?tacilytics=off` does not work — exclude your own visits another way (e.g. a test browser you don't count, or filter yourself out in the dashboard). Strict mode does not decide whether you need consent; that depends on your jurisdiction and the rest of your website. This is not legal advice.
 
 **Your own visits:** open your site once with `?tacilytics=off` (e.g. `https://example.com/?tacilytics=off`) and that browser is no longer counted on that site. `?tacilytics=on` undoes it. It is stored in the browser's localStorage, nothing is sent; repeat it on every browser and phone you use. Settings → Security has the links for all your sites.
 
@@ -271,7 +273,7 @@ row per pageview. The dashboard aggregates it with plain SQL.
 counts unique visitors *per day* and can’t follow the same person across days or
 devices. You get the 95 % that matters (how many, which pages, from where) without cookies,
 the same approach as Plausible/Fathom. Whether you still need consent depends on your
-jurisdiction and setup; strict mode (`data-strict`) removes the device reads as well.
+jurisdiction and setup; strict mode (`data-strict`) reduces the device reads further.
 
 ## Light mode & German
 
@@ -334,7 +336,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
   - **One process only.** The salt is drawn by the single Node process. Running several processes against the same `data/` would let each draw its own salt at midnight.
 - **Data minimisation:** set `DATA_RETENTION_DAYS` to auto-purge raw events after your chosen window.
 - **Respects DNT / Global Privacy Control** when you add `data-honor-dnt` to the tag.
-- **Strict mode** (`data-strict`) reads nothing from the visitor's device (no localStorage, time zone, language or window size). See [Strict mode](#strict-mode).
+- **Strict mode** (`data-strict`) skips the device reads (no localStorage, time zone, language or window size). See [Strict mode](#strict-mode).
 - Engagement time adds **no new identifier** — it’s matched to the visitor’s own daily hash server-side.
 - Custom event properties are capped (scalars only, size-limited) so they can’t become a PII dumping ground.
 - Passwords hashed with scrypt; session tokens, invite links and recovery codes are stored only as SHA-256. Sessions live in the database (survive restarts, expire after 30 days).
@@ -348,7 +350,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | | Tacilytics | Google Analytics |
 |---|---|---|
 | Cookies | ❌ none | ✅ yes |
-| Reads from the device | only with default settings, none in strict mode | ✅ a lot |
+| Reads from the device | yes (time zone, language, window size, 1 flag) · none of these in strict mode | ✅ a lot |
 | Stores IPs / personal data | ❌ never | ✅ yes |
 | Self-hosted, you own the data | ✅ | ❌ |
 | Weight | ~2 KB | ~45 KB+ |
