@@ -1002,6 +1002,16 @@ app.get('/api/funnels/:id/stats', authOrShare, (req, res) => {
 });
 
 // ── static dashboard ─────────────────────────────────────────────────────────
+// Hosting (e.g. Tacilytics Cloud): DASHBOARD_EXTRA_SCRIPT="/cloud/ui.js" adds one same-origin script to the
+// dashboard page (trial/billing banner). Only a plain local path is accepted, never a URL to another host.
+const EXTRA_SCRIPT = /^\/[A-Za-z0-9._\/-]{1,120}$/.test(process.env.DASHBOARD_EXTRA_SCRIPT || '') && !/\.\.|\/\//.test(process.env.DASHBOARD_EXTRA_SCRIPT) ? process.env.DASHBOARD_EXTRA_SCRIPT : '';
+const INDEX_HTML = path.join(__dirname, 'public', 'index.html');
+function sendIndex(_req, res) {
+  if (!EXTRA_SCRIPT) return res.sendFile(INDEX_HTML);
+  const html = fs.readFileSync(INDEX_HTML, 'utf8').replace('</body>', `<script src="${EXTRA_SCRIPT}" defer></script>\n</body>`);
+  res.type('html').set('Cache-Control', 'no-cache').send(html);
+}
+app.get(['/', '/index.html'], sendIndex);
 app.use(express.static(path.join(__dirname, 'public')));
 // ── visitor journeys: session-based path transitions for a sankey flow ───────────
 // A "session" = one visitor's pageviews with < 30 min between them.
@@ -1375,6 +1385,6 @@ if (process.env.TACILYTICS_TEST_HOOKS === '1') {
 // unknown API paths are a 404 in JSON — never the SPA page. A client that asks an older/newer server for a
 // route it doesn't have must get an error it can show, not HTML it would try to read as data (Kiro, 2.2.0).
 app.all(/^\/(api|auth)(\/|$)/, (_req, res) => res.status(404).json({ error: 'Not found' }));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', sendIndex);
 
 app.listen(PORT, '127.0.0.1', () => console.log(`Tacilytics on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
