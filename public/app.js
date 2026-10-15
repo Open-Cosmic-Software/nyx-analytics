@@ -420,6 +420,48 @@
     });
   }
 
+  // ── alerts ──
+  var KIND_LABEL = { spike: 'Traffic spike', drop: 'Traffic drop', goal: 'Goal' };
+  function openAlerts() {
+    $('alertsModal').classList.remove('hide'); $('alertsErr').textContent = ''; $('alertsSite').textContent = state.site;
+    var goals = ((lastStats && lastStats.goals) || []).map(function (g) { return g.name; });
+    $('alGoalList').innerHTML = goals.map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
+    api('/api/alerts?site=' + encodeURIComponent(state.site)).then(function (r) {
+      if (r.error) { $('alertsErr').textContent = r.error; return; }
+      $('alHint').textContent = r.fallbackWebhook ? 'Leave the webhook empty to use the server default (DIGEST_WEBHOOK_URL).' : 'Discord: channel settings → Integrations → Webhooks → Copy URL.';
+      $('alWebhook').placeholder = r.fallbackWebhook ? 'Webhook URL (optional — server default)' : 'Webhook URL (https://…)';
+      $('alertsList').innerHTML = r.alerts.length ? '<div class="set-card">' + r.alerts.map(function (a) {
+        var what = a.kind === 'goal' ? a.threshold + '× ' + esc(a.goal) + ' in ' + (a.window_hours === 1 ? '1 h' : a.window_hours === 24 ? '24 h' : '7 days') : KIND_LABEL[a.kind];
+        return '<div class="set-row"><span>' + ico(a.kind === 'goal' ? 'i-goal' : a.kind === 'drop' ? 'i-down' : 'i-up', 'ui') + '<strong>' + what + '</strong>' +
+          ' <span class="muted small">→ ' + esc(a.webhook || 'server default') + (a.last_fired ? ' · last sent ' + new Date(a.last_fired).toLocaleString() : '') + '</span></span>' +
+          '<label class="small muted" style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-al-on="' + a.id + '"' + (a.enabled ? ' checked' : '') + ' style="width:auto;margin:0"> on</label>' +
+          '<button class="btn ghost mini" data-al-test="' + a.id + '">Test</button>' +
+          '<button class="btn ghost danger mini" data-al-del="' + a.id + '">Remove</button></div>';
+      }).join('') + '</div>' : '<p class="muted small">No alerts for this site yet.</p>';
+      var L = $('alertsList');
+      L.querySelectorAll('[data-al-on]').forEach(function (c) { c.onchange = function () { api('/api/alerts/' + c.dataset.alOn, { method: 'PATCH', body: JSON.stringify({ enabled: c.checked }) }); }; });
+      L.querySelectorAll('[data-al-del]').forEach(function (b) { b.onclick = function () { api('/api/alerts/' + b.dataset.alDel, { method: 'DELETE' }).then(openAlerts); }; });
+      L.querySelectorAll('[data-al-test]').forEach(function (b) {
+        b.onclick = function () {
+          b.textContent = 'Sending…';
+          api('/api/alerts/' + b.dataset.alTest + '/test', { method: 'POST' }).then(function (r) { b.textContent = r.error ? 'Failed' : 'Sent ✓'; if (r.error) $('alertsErr').textContent = r.error; });
+        };
+      });
+    });
+  }
+  $('alertsBtn').onclick = openAlerts;
+  $('closeAlerts').onclick = function () { $('alertsModal').classList.add('hide'); };
+  $('alKind').onchange = function () { $('alGoalRow').classList.toggle('hide', this.value !== 'goal'); };
+  $('alAdd').onclick = function () {
+    $('alertsErr').textContent = '';
+    var body = { site: state.site, kind: $('alKind').value, webhook: $('alWebhook').value.trim() || undefined };
+    if (body.kind === 'goal') { body.goal = $('alGoal').value.trim(); body.threshold = Number($('alThreshold').value); body.window_hours = Number($('alWindow').value); }
+    api('/api/alerts', { method: 'POST', body: JSON.stringify(body) }).then(function (r) {
+      if (r.error) { $('alertsErr').textContent = r.error; return; }
+      $('alWebhook').value = ''; openAlerts();
+    });
+  };
+
   // ── add / list annotations ──
   function openAnnotations() {
     $('annModal').classList.remove('hide'); $('annErr').textContent = '';
@@ -814,7 +856,7 @@
       state.site = info.domain;
       var sel = $('siteSelect');
       sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
-      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn', 'alertsBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
       syncLegend();
       load();
       clearInterval(window.__rt);

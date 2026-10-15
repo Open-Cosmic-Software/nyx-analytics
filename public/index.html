@@ -95,6 +95,7 @@
         <button class="btn ghost" id="applyRange">Apply</button>
       </div>
       <button class="btn ghost" id="exportBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-download"></use></svg>CSV</button>
+      <button class="btn ghost" id="alertsBtn" title="Get a message on traffic spikes, drops or reached goals"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-bell"></use></svg>Alerts</button>
       <button class="btn ghost" id="shareBtn" title="Create a public read-only link"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-share"></use></svg>Share</button>
       <button class="btn ghost" id="snippetBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-code"></use></svg>Embed code</button>
     </div>
@@ -273,6 +274,38 @@
   </div>
 </div>
 
+<!-- Alerts -->
+<div id="alertsModal" class="modal-overlay hide">
+  <div class="modal modal-wide settings">
+    <h2>Alerts for <span id="alertsSite"></span></h2>
+    <p>Tacilytics sends a message to a webhook (Discord, Slack, or anything that takes JSON). Checked every 10 minutes.</p>
+    <div id="alertsErr" class="err" role="alert"></div>
+    <div id="alertsList"></div>
+    <div class="set-card">
+      <h3>New alert</h3>
+      <div class="set-inline">
+        <select id="alKind">
+          <option value="spike">Traffic spike — about 3× the usual for this hour</option>
+          <option value="drop">Traffic drop — under 20 % of usual (tracker broken?)</option>
+          <option value="goal">Goal reached — e.g. 10× Purchase</option>
+        </select>
+      </div>
+      <div class="set-inline hide" id="alGoalRow">
+        <input id="alGoal" type="text" placeholder="Event name, e.g. Purchase" maxlength="80" list="alGoalList">
+        <datalist id="alGoalList"></datalist>
+        <input id="alThreshold" type="number" min="1" value="10" style="flex:0 0 90px" title="How many">
+        <select id="alWindow" style="flex:0 0 140px"><option value="1">in 1 hour</option><option value="24" selected>in 24 hours</option><option value="168">in 7 days</option></select>
+      </div>
+      <div class="set-inline">
+        <input id="alWebhook" type="url" placeholder="Webhook URL (https://…)">
+        <button class="btn" id="alAdd">Add alert</button>
+      </div>
+      <p class="muted small" id="alHint" style="margin:8px 0 0"></p>
+    </div>
+    <button class="btn ghost" id="closeAlerts" style="margin-top:12px">Close</button>
+  </div>
+</div>
+
 <!-- Chart annotations -->
 <div id="annModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
@@ -306,6 +339,6 @@
 
 <div class="tip" id="tip"></div>
 <script src="/account.js?v=2.2.0"></script>
-<script src="/app.js?v=2.4.0"></script>
+<script src="/app.js?v=2.5.0"></script>
 </body>
 </html>

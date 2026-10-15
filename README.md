@@ -159,6 +159,18 @@ device locale, never from IP geolocation.
 
 Click **Notes** in the chart legend to mark a day — a newsletter, a release, a sale. A coral line and a diamond appear on that day, the note shows in the tooltip, and everyone with access to the site (including share links) sees it. Admins and owners add and remove notes. `GET /api/annotations?site=…` lists them; `/stats` returns the ones in its range as `annotations`.
 
+## Alerts
+
+**Alerts** (toolbar) sends a message to a webhook — Discord, Slack, or anything that takes JSON — when:
+
+- **Traffic spike:** about 3× the usual for this hour of the day,
+- **Traffic drop:** under 20 % of usual (often: the tracker fell off the site),
+- **Goal reached:** e.g. 10× `Purchase` within 1 hour, 24 hours or 7 days.
+
+"Usual" is the median of the same hour over the last 14 days, so quiet nights don't look like incidents. Checked every 10 minutes, with a cooldown so one long spike is one message. **Test** sends a sample message. Admins and owners manage alerts.
+
+Webhooks entered in the dashboard must be public `https://` addresses — no localhost, private ranges or redirects, so nobody on the team can use alerts to reach internal services. `DIGEST_WEBHOOK_URL` from `.env` is the default target (and may be internal); sites without own alerts keep the default spike/drop alerts there.
+
 ## Live visitors
 
 Click **“● online now”** for a realtime view: a 30-minute pulse and a live feed of
@@ -256,6 +268,8 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
+| `DIGEST_WEBHOOK_URL` | — | Daily digest + default alert target (Discord/Slack-compatible). `off` disables it |
+| `WATCH_MIN_VISITORS` | `10` | Spike/drop alerts stay silent below this many visitors per hour |
 | `AUDIT_RETENTION_DAYS` | `365` | How long the team activity log is kept (min. 30) |
 | `DATA_RETENTION_DAYS` | `0` | `0` = keep forever; `>0` purges raw events older than N days, daily (data minimisation) |
 
