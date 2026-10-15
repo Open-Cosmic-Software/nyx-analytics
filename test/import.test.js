@@ -41,8 +41,8 @@ const PLAUSIBLE = [
 ];
 
 test('importers: parsing', async (t) => {
-  await t.test('Plausible ZIP → totals + dimensions', () => {
-    const r = parseImport('plausible', { zip: zip(PLAUSIBLE) });
+  await t.test('Plausible ZIP → totals + dimensions', async () => {
+    const r = await parseImport('plausible', { zip: zip(PLAUSIBLE) });
     const tot = r.rows.filter((x) => x.dim === '');
     assert.strictEqual(tot.length, 3);
     assert.strictEqual(tot.reduce((a, x) => a + x.pageviews, 0), 870);
@@ -50,25 +50,25 @@ test('importers: parsing', async (t) => {
     assert.ok(r.rows.some((x) => x.dim === 'source' && x.name === 'Direct' && x.visitors === 30), 'empty source = Direct');
     assert.ok(r.rows.some((x) => x.dim === 'event' && x.name === 'Purchase' && x.pageviews === 9));
   });
-  await t.test('GA4 CSV with comment header, German columns, grand total line skipped', () => {
+  await t.test('GA4 CSV with comment header, German columns, grand total line skipped', async () => {
     const csv = '# ----------------------------------------\n# Seiten\n# 20260901-20260902\n# ----------------------------------------\nSeitenpfad und Bildschirmklasse,Datum,Aufrufe,Nutzer insgesamt\n/a,20260901,1.234,500\n/b,20260901,10,4\n/a,20260902,20,9\n,,1.264,513\n';
-    const r = parseImport('ga', { files: [{ name: 'Seiten.csv', text: csv }] });
+    const r = await parseImport('ga', { files: [{ name: 'Seiten.csv', text: csv }] });
     const a = r.rows.filter((x) => x.dim === 'page' && x.name === '/a');
     assert.deepStrictEqual(a.map((x) => x.pageviews), [1234, 20]);
     const tot = r.rows.filter((x) => x.dim === '');
     assert.deepStrictEqual(tot.map((x) => [x.day, x.pageviews]), [['2026-09-01', 1244], ['2026-09-02', 20]], 'totals derived from the only dimension');
   });
-  await t.test('GA4 "source / medium" rows are merged per source', () => {
+  await t.test('GA4 "source / medium" rows are merged per source', async () => {
     const csv = 'Date,Session source / medium,Total users,Views\n20260901,google / organic,10,20\n20260901,google / cpc,5,6\n20260901,(direct) / (none),3,3\n';
-    const r = parseImport('ga', { files: [{ name: 's.csv', text: csv }] });
+    const r = await parseImport('ga', { files: [{ name: 's.csv', text: csv }] });
     assert.deepStrictEqual(r.rows.filter((x) => x.dim === 'source').map((x) => [x.name, x.visitors]).sort(), [['Direct', 3], ['google', 15]]);
   });
-  await t.test('a CSV without a date column is refused with a hint', () => {
-    assert.throws(() => parseImport('ga', { files: [{ name: 'x.csv', text: 'Page,Views\n/a,3\n' }] }), /Date column/);
+  await t.test('a CSV without a date column is refused with a hint', async () => {
+    await assert.rejects(() => parseImport('ga', { files: [{ name: 'x.csv', text: 'Page,Views\n/a,3\n' }] }), /Date column/);
   });
-  await t.test('ZIP bomb guard', () => {
+  await t.test('ZIP bomb guard', async () => {
     const big = zip([['imported_visitors_x.csv', 'a'.repeat(1000)]]);
-    assert.throws(() => I.unzip(big, { maxBytes: 100 }), /too large/);
+    await assert.rejects(() => I.unzip(big, { maxBytes: 100 }), /too large/);
   });
 });
 

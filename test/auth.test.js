@@ -452,5 +452,11 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
     assert.strictEqual((await call('GET', '/api/me', { token: owner })).status, 401);
     const x = await call('POST', '/auth/login', { body: { username: 'fabi', password: newPw } });
     assert.ok(x.j.token, JSON.stringify(x.j));
+    // the CLI reset shows up in the activity log, actor CLI
+    const logRes = await call('GET', '/api/audit', { token: x.j.token }); const log = logRes.j;
+    assert.ok(Array.isArray(log), 'audit: ' + logRes.status + ' ' + JSON.stringify(log));
+    const e = log.find((r) => r.action === 'cli.reset');
+    assert.ok(e, 'cli.reset missing in the activity log');
+    assert.deepStrictEqual([e.actor, e.target], ['CLI', 'fabi']);
   });
 });

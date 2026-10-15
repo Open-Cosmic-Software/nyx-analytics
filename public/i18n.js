@@ -3,7 +3,7 @@
    placeholder / title / aria-label that appears in the DOM is looked up in a dictionary
    (exact match, then a few patterns for strings with numbers or names in them).
    A MutationObserver covers everything rendered later, so new code needs no t() calls.
-   Unknown strings stay English; window.__taciMissing collects them (for translators).
+   Unknown strings stay English; with ?i18n=debug window.__taciMissing collects them (for translators).
    Language: Settings → Security → Language (auto = browser language), per browser. */
 (function () {
   var DE = {
@@ -126,6 +126,8 @@
     'created API key': 'hat API-Key erstellt', 'revoked API key': 'hat API-Key widerrufen', 'turned the weekly report on': 'hat den Wochenbericht eingeschaltet',
     'turned the weekly report off': 'hat den Wochenbericht ausgeschaltet', 'added alert': 'hat Alarm hinzugefügt', 'removed alert': 'hat Alarm entfernt',
     'turned alert on': 'hat Alarm eingeschaltet', 'turned alert off': 'hat Alarm ausgeschaltet', 'imported history': 'hat Daten importiert', 'removed import': 'hat Import entfernt',
+    'reset the login (password, 2FA, sessions) of': 'hat die Anmeldung zurückgesetzt (Passwort, 2FA, Sitzungen) von',
+    'Visitors on imported days are summed per day, not unique across days.': 'Besucher an importierten Tagen werden pro Tag summiert, nicht über Tage hinweg eindeutig gezählt.',
     'Tacilytics · open source ·': 'Tacilytics · Open Source ·',
     'Direct / none': 'Direkt / keine', 'Android app': 'Android-App', 'iOS app': 'iOS-App', 'Web': 'Web',
     'For scripts, agents and the CLI (': 'Für Skripte, Agents und die CLI (',
@@ -173,7 +175,10 @@
   var L = lang();
   var DE_VALUES = {}; // already-German strings: never "missing", never re-translated
   document.documentElement.setAttribute('lang', L);
-  window.__taciMissing = window.__taciMissing || {};
+  // collecting untranslated strings only on demand (?i18n=debug) — otherwise the set would grow with
+  // every page path / source shown during a long session
+  var DEBUG = /[?&]i18n=debug\b/.test(location.search);
+  if (DEBUG) window.__taciMissing = window.__taciMissing || {};
   function tr(s) {
     if (L !== 'de' || !s) return null;
     var lead = s.match(/^\s*/)[0], tail = s.match(/\s*$/)[0], core = s.trim();
@@ -181,7 +186,7 @@
     if (Object.prototype.hasOwnProperty.call(DE, core)) return lead + DE[core] + tail;
     if (DE_VALUES[core]) return null;
     for (var i = 0; i < DE_RX.length; i++) if (DE_RX[i][0].test(core)) return lead + noteResult(core.replace(DE_RX[i][0], DE_RX[i][1])) + tail;
-    window.__taciMissing[core] = 1;
+    if (DEBUG) window.__taciMissing[core] = 1;
     return null;
   }
   function addValue(v) { if (typeof v === 'string') DE_VALUES[v.trim()] = 1; }

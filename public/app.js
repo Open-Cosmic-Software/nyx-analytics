@@ -422,7 +422,7 @@
         tip.innerHTML = '<strong>' + esc(d.label) + '</strong>' +
           (showV ? '<br>' + d.visitors + ' visitors' : '') +
           (showP ? '<br>' + d.pageviews + ' views' : '') +
-          notes.map(function (a) { return '<br><span class="tip-note">◆ ' + esc(a.text) + '</span>'; }).join('');
+          notes.map(function (a) { return '<br><span class="tip-note" data-no-i18n>◆ ' + esc(a.text) + '</span>'; }).join('');
         tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 10) + 'px'; tip.style.opacity = 1;
       });
       rect.addEventListener('mouseleave', function () { tip.style.opacity = 0; });
@@ -490,9 +490,9 @@
       $('alHint').textContent = r.fallbackWebhook ? 'Leave the webhook empty to use the server default (DIGEST_WEBHOOK_URL).' : 'Discord: channel settings → Integrations → Webhooks → Copy URL.';
       $('alWebhook').placeholder = r.fallbackWebhook ? 'Webhook URL (optional — server default)' : 'Webhook URL (https://…)';
       $('alertsList').innerHTML = r.alerts.length ? '<div class="set-card">' + r.alerts.map(function (a) {
-        var what = a.kind === 'goal' ? a.threshold + '× ' + esc(a.goal) + ' in ' + (a.window_hours === 1 ? '1 h' : a.window_hours === 24 ? '24 h' : '7 days') : KIND_LABEL[a.kind];
+        var what = a.kind === 'goal' ? a.threshold + '× <span data-no-i18n>' + esc(a.goal) + '</span> in ' + (a.window_hours === 1 ? '1 h' : a.window_hours === 24 ? '24 h' : '7 days') : KIND_LABEL[a.kind];
         return '<div class="set-row"><span>' + ico(a.kind === 'goal' ? 'i-goal' : a.kind === 'drop' ? 'i-down' : 'i-up', 'ui') + '<strong>' + what + '</strong>' +
-          ' <span class="muted small">→ ' + esc(a.webhook || 'server default') + (a.last_fired ? ' · last sent ' + new Date(a.last_fired).toLocaleString() : '') + '</span></span>' +
+          ' <span class="muted small">→ ' + (a.webhook ? '<span data-no-i18n>' + esc(a.webhook) + '</span>' : 'server default') + (a.last_fired ? ' · last sent ' + new Date(a.last_fired).toLocaleString() : '') + '</span></span>' +
           '<label class="small muted" style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" data-al-on="' + a.id + '"' + (a.enabled ? ' checked' : '') + ' style="width:auto;margin:0"> on</label>' +
           '<button class="btn ghost mini" data-al-test="' + a.id + '">Test</button>' +
           '<button class="btn ghost danger mini" data-al-del="' + a.id + '">Remove</button></div>';
@@ -527,7 +527,7 @@
     $('annDay').value = new Date().toISOString().slice(0, 10); $('annText').value = ''; $('annText').focus();
     api('/api/annotations?site=' + encodeURIComponent(state.site)).then(function (list) {
       $('annList').innerHTML = (list || []).length ? list.map(function (a) {
-        return '<div class="set-row"><span><strong>' + esc(a.day) + '</strong> ' + esc(a.text) + (a.created_by ? ' <span class="muted small">· ' + esc(a.created_by) + '</span>' : '') + '</span>' +
+        return '<div class="set-row"><span><strong>' + esc(a.day) + '</strong> <span data-no-i18n>' + esc(a.text) + '</span>' + (a.created_by ? ' <span class="muted small">· ' + esc(a.created_by) + '</span>' : '') + '</span>' +
           '<button class="btn ghost danger mini" data-delann="' + a.id + '">Remove</button></div>';
       }).join('') : '<p class="muted small">No notes yet.</p>';
       $('annList').querySelectorAll('[data-delann]').forEach(function (b) {
@@ -684,7 +684,7 @@
       if (s.error) return;
       lastStats = s;
       var imn = $('importedNote');
-      if (s.imported && s.imported.included) { imn.textContent = 'Includes imported history' + (s.imported.until ? ' (until ' + s.imported.until + ')' : '') + '.'; imn.classList.remove('hide'); }
+      if (s.imported && s.imported.included) { imn.textContent = 'Includes imported history' + (s.imported.until ? ' (until ' + s.imported.until + ')' : '') + '.'; imn.title = 'Visitors on imported days are summed per day, not unique across days.'; imn.classList.remove('hide'); }
       else if (s.imported && s.imported.excludedByFilter) { imn.textContent = 'Imported history is hidden while a filter is active.'; imn.classList.remove('hide'); }
       else imn.classList.add('hide');
       $('s-visitors').textContent = fmt(s.totals.visitors);

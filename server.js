@@ -812,7 +812,7 @@ app.get('/api/share-info/:token', (req, res) => {
 
 // ── import history: Plausible export ZIP / CSVs, Google Analytics 4 CSVs (owner/admin) ──
 const { parseImport } = require('./importers');
-app.post('/api/imports', adminOnly, express.raw({ type: ['application/zip', 'application/octet-stream', 'text/csv', 'text/plain'], limit: '60mb' }), (req, res) => {
+app.post('/api/imports', adminOnly, express.raw({ type: ['application/zip', 'application/octet-stream', 'text/csv', 'text/plain'], limit: '60mb' }), async (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
@@ -821,7 +821,7 @@ app.post('/api/imports', adminOnly, express.raw({ type: ['application/zip', 'app
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Upload a .zip or .csv file' });
   const isZip = req.body.readUInt32LE(0) === 0x04034b50;
   let parsed;
-  try { parsed = parseImport(source, isZip ? { zip: req.body } : { files: [{ name: String(req.query.name || 'upload.csv').slice(0, 120), text: req.body.toString('utf8') }] }); }
+  try { parsed = await parseImport(source, isZip ? { zip: req.body } : { files: [{ name: String(req.query.name || 'upload.csv').slice(0, 120), text: req.body.toString('utf8') }] }); }
   catch (e) { return res.status(400).json({ error: e.message }); }
   const rows = parsed.rows.filter((r) => r.visitors || r.pageviews);
   if (!rows.length) return res.status(400).json({ error: 'The file contains no daily numbers' });
@@ -1019,39 +1019,39 @@ db.exec(`
   );
 `);
 const ALERT_KINDS = ['spike', 'drop', 'goal'];
-// SSRF guard: alerts are sent by the server, so a teammate must not be able to point them at
-// internal services. https only, no IP literals in private ranges, no localhost names.
-function webhookProblem(u) {
-  let url; try { url = new URL(String(u)); } catch { return 'Enter a full https:// URL'; }
-  if (url.protocol !== 'https:') return 'Webhook must use https://';
-  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || !h.includes('.') && !h.includes(':')) return 'Webhook must point to a public address';
-  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(h)) return 'Webhook must point to a public address';
-  if (h.includes(':') && (h === '::1' || /^(fc|fd|fe8|fe9|fea|feb|::ffff:)/.test(h) || h === '::')) return 'Webhook must point to a public address';
-  return null;
-}
-// resolve the name too: a public-looking hostname must not resolve to a private address
-const dnsP = require('dns').promises;
-async function webhookResolvesPublic(u) {
-  const h = new URL(u).hostname.replace(/^\[|\]$/g, '');
-  let addrs; try { addrs = (await dnsP.lookup(h, { all: true })).map((a) => a.address); } catch { return false; }
-  return addrs.length > 0 && addrs.every((a) => !webhookProblem('https://' + (a.includes(':') ? '[' + a + ']' : a) + '/'));
-}
+// SSRF guard (webhook.js): https only, public addresses only — checked when saved AND at
+// connect time (the dialled IP itself), so DNS rebinding between check and send does not help.
+const { webhookProblem, resolvesPublic: webhookResolvesPublic, postJson: postWebhook } = require('./webhook');
 // tests only: a local http receiver (never set this in production)
 const TEST_WEBHOOK_BASE = process.env.TACILYTICS_TEST_HOOKS === '1' ? (process.env.TACILYTICS_TEST_WEBHOOK_BASE || '') : '';
 const isTestWebhook = (u) => !!TEST_WEBHOOK_BASE && String(u).startsWith(TEST_WEBHOOK_BASE);
 // The operator's DIGEST_WEBHOOK_URL (.env) is trusted as before (may be internal, e.g. ntfy on localhost).
 // Webhooks typed into the dashboard are checked, because a teammate must not reach internal services.
+// tests only: a fake resolver (TACILYTICS_TEST_DNS='{"name":["1.2.3.4","127.0.0.1"]}' → answers in turn)
+let webhookLookup = require('dns').lookup;
+if (process.env.TACILYTICS_TEST_HOOKS === '1' && process.env.TACILYTICS_TEST_DNS) {
+  const table = JSON.parse(process.env.TACILYTICS_TEST_DNS), seen = {};
+  const real = webhookLookup;
+  webhookLookup = (host, opts, cb) => {
+    if (typeof opts === 'function') { cb = opts; opts = {}; }
+    if (!table[host]) return real(host, opts, cb);
+    const list = table[host], i = Math.min(seen[host] = (seen[host] || 0) + 1, list.length) - 1;
+    const address = list[i], family = address.includes(':') ? 6 : 4;
+    return opts.all ? cb(null, [{ address, family }]) : cb(null, address, family);
+  };
+}
 async function deliver(url, text) {
   const trusted = url && (url === DIGEST_WEBHOOK_URL || isTestWebhook(url));
-  if (!url || (!trusted && (webhookProblem(url) || !(await webhookResolvesPublic(url))))) { console.error('alert: webhook refused'); return false; }
+  if (!url || (!trusted && (webhookProblem(url) || !(await webhookResolvesPublic(url, webhookLookup))))) { console.error('alert: webhook refused'); return false; }
   const isSlack = /hooks\.slack\.com/.test(url);
   const body = isSlack ? { text } : { username: 'Tacilytics', content: text, text };
   try {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), redirect: trusted ? 'follow' : 'error', signal: AbortSignal.timeout(10000) });
+    const r = trusted
+      ? await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) })
+      : await postWebhook(url, body, { lookup: webhookLookup }); // no redirects, IP checked on connect
     if (!r.ok) console.error('alert webhook failed:', r.status);
     return r.ok;
-  } catch (e) { console.error('alert webhook error:', e.message); return false; }
+  } catch (e) { console.error(e.code === 'EWEBHOOKPRIVATE' ? 'alert: webhook refused (resolved to a private address)' : 'alert webhook error: ' + e.message); return false; }
 }
 function publicAlert(a, domain) {
   return { id: a.id, site: domain, kind: a.kind, goal: a.goal, threshold: a.threshold, window_hours: a.window_hours,
@@ -1084,7 +1084,7 @@ app.post('/api/alerts', adminOnly, async (req, res) => {
   } else if (b.webhook) {
     const prob = webhookProblem(b.webhook);
     if (prob) return res.status(400).json({ error: prob });
-    if (!(await webhookResolvesPublic(b.webhook))) return res.status(400).json({ error: 'Webhook must point to a public address' });
+    if (!(await webhookResolvesPublic(b.webhook, webhookLookup))) return res.status(400).json({ error: 'Webhook must point to a public address' });
     webhook = String(b.webhook);
   } else if (!DIGEST_WEBHOOK_URL) return res.status(400).json({ error: 'Add a webhook URL (no default DIGEST_WEBHOOK_URL is set)' });
   if (db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n >= 20) return res.status(400).json({ error: 'At most 20 alerts per site' });

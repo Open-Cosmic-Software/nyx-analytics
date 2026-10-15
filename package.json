@@ -52,6 +52,7 @@
     "auth.js",
     "importers.js",
     "report.js",
+    "webhook.js",
     "tz-country.js",
     "public/",
     "sdk/flutter/",

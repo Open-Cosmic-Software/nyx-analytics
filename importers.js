@@ -41,7 +41,9 @@ function parseCSV(text) {
 }
 
 // ── ZIP (stored + deflate, via the central directory; enough for analytics exports) ──
-function unzip(buf, { maxFiles = 50, maxBytes = 200 * 1024 * 1024 } = {}) {
+// async: inflating a big export must not block the event loop (tracking keeps running meanwhile)
+const inflateRaw = require('util').promisify(zlib.inflateRaw);
+async function unzip(buf, { maxFiles = 50, maxBytes = 200 * 1024 * 1024 } = {}) {
   const out = [];
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -63,7 +65,7 @@ function unzip(buf, { maxFiles = 50, maxBytes = 200 * 1024 * 1024 } = {}) {
     const data = buf.slice(off + 30 + lnlen + lelen, off + 30 + lnlen + lelen + csize);
     let content;
     if (method === 0) content = data;
-    else if (method === 8) content = zlib.inflateRawSync(data, { maxOutputLength: Math.max(usize, 1) + 1024 });
+    else if (method === 8) content = await inflateRaw(data, { maxOutputLength: Math.max(usize, 1) + 1024 });
     else throw new Error('Unsupported ZIP compression in ' + name);
     out.push({ name: name.split('/').pop(), text: content.toString('utf8') });
   }
@@ -208,10 +210,10 @@ function ensureTotals(rows) {
   return rows.concat([...tot.values()]);
 }
 
-function parseImport(source, input) {
+async function parseImport(source, input) {
   // input: { zip: Buffer } or { files: [{ name, text }] }
   let files = input.files || [];
-  if (input.zip) files = unzip(input.zip);
+  if (input.zip) files = await unzip(input.zip);
   if (!files.length) throw new Error('No files');
   const r = source === 'plausible' ? fromPlausible(files) : source === 'ga' ? fromGA(files) : null;
   if (!r) throw new Error('source must be plausible or ga');

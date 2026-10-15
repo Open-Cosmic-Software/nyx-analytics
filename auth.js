@@ -774,6 +774,9 @@ function adminOps(db) {
       const pw = crypto.randomBytes(12).toString('base64url');
       db.prepare('UPDATE users SET pw_hash = ?, totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(hashPasswordSync(pw), u.id);
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
+      // the dashboard's activity log should show this too (the CLI bypasses the HTTP audit middleware)
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_log'").get())
+        db.prepare('INSERT INTO audit_log (ts, actor, action, target, ip) VALUES (?, ?, ?, ?, ?)').run(Date.now(), 'CLI', 'cli.reset', u.username, null);
       return pw;
     },
   };

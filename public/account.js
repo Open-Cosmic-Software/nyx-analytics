@@ -392,7 +392,7 @@
       var rows = t.users.map(function (u) {
         var self = me && me.id === u.id;
         return '<div class="set-row team-row" data-uid="' + u.id + '">' +
-          '<span><strong>' + esc(u.username) + '</strong>' + (self ? ' <span class="muted small">(you)</span>' : '') +
+          '<span><strong data-no-i18n>' + esc(u.username) + '</strong>' + (self ? ' <span class="muted small">(you)</span>' : '') +
           '<br><span class="muted small">' + (u.role === 'viewer' ? siteNames(u.sites) + ' · ' : '') + (u.totp ? '2FA on' : 'no 2FA') + (u.passkeys ? ' · ' + u.passkeys + ' passkey' + (u.passkeys > 1 ? 's' : '') : '') + ' · last sign-in ' + date(u.last_login) + '</span></span>' +
           '<select data-role>' + ['owner', 'admin', 'viewer'].map(function (r) { return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + ROLE_LABEL[r] + '</option>'; }).join('') + '</select>' +
           '<span class="row-actions">' + (u.role === 'viewer' ? '<button class="btn ghost mini" data-sites>Sites</button>' : '') +
@@ -469,7 +469,7 @@
     'team.join': 'joined via invite', 'team.change': 'changed role', 'team.remove': 'removed member', 'team.2fa.reset': 'reset 2FA of',
     'team.reset-link': 'created password link for', 'me.password': 'changed own password', 'me.password.reset-link': 'set a new password via link',
     'me.2fa.on': 'turned 2FA on', 'me.2fa.off': 'turned 2FA off', 'me.recovery.new': 'made new recovery codes',
-    'me.report.on': 'turned the weekly report on', 'me.report.off': 'turned the weekly report off',
+    'cli.reset': 'reset the login (password, 2FA, sessions) of', 'me.report.on': 'turned the weekly report on', 'me.report.off': 'turned the weekly report off',
     'alert.add': 'added alert', 'alert.remove': 'removed alert', 'alert.on': 'turned alert on', 'alert.off': 'turned alert off',
     'me.passkey.add': 'added passkey', 'me.passkey.remove': 'removed passkey', 'me.apikey.add': 'created API key', 'me.apikey.revoke': 'revoked API key',
   };
@@ -480,7 +480,7 @@
         var when = new Date(e.ts);
         return '<div class="set-row act-row"><span class="muted small act-time" title="' + esc(when.toISOString()) + '">' +
           esc(when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })) + '</span>' +
-          '<span><strong>' + esc(e.actor || 'someone') + '</strong> ' + esc(ACTION_LABEL[e.action] || e.action) + (e.target ? ' <span class="act-target">' + esc(e.target) + '</span>' : '') + '</span>' +
+          '<span><strong' + (e.actor && e.actor !== 'API key' && e.actor !== 'passphrase' ? ' data-no-i18n' : '') + '>' + esc(e.actor || 'someone') + '</strong> ' + esc(ACTION_LABEL[e.action] || e.action) + (e.target ? ' <span class="act-target">' + esc(e.target) + '</span>' : '') + '</span>' +
           '<span class="muted small act-ip">' + esc(e.ip || '') + '</span></div>';
       }).join('');
       if (!append) el.innerHTML = '<div class="set-card"><h3>' + ico('i-timer') + 'Activity</h3><p class="muted">Every change by anyone on the team, newest first. Kept for a year (AUDIT_RETENTION_DAYS).</p><div id="actRows"></div><div id="actMore"></div></div>';
