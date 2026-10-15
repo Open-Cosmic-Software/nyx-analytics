@@ -546,3 +546,5 @@ html[data-theme="light"] { --sb-thumb: rgba(10, 40, 38, 0.18); --sb-thumb-hover:
 ::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
 .modal::-webkit-scrollbar-track { margin: 14px 0; } /* keeps the thumb off the rounded corners */
+/* login / reset / invite always on top: a 401 while Settings is open must not hide the login behind it */
+#login, #reset, #invite { z-index: 1100; }

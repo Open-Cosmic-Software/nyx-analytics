@@ -502,7 +502,10 @@
   }
   function topModal() {
     var open = [].filter.call(document.querySelectorAll('.modal-overlay'), function (o) { return !o.classList.contains('hide'); });
-    return open[open.length - 1] || null; // later in the DOM = drawn on top
+    // a locked one (e.g. login after the session expired) wins even though it sits first in the DOM —
+    // otherwise Esc would close the settings BEHIND the login
+    var locked = open.filter(function (o) { return LOCKED[o.id]; })[0];
+    return locked || open[open.length - 1] || null; // later in the DOM = drawn on top
   }
   document.addEventListener('click', function (e) {
     var x = e.target.closest && e.target.closest('[data-close]');
@@ -518,7 +521,7 @@
   document.addEventListener('mousedown', function (e) { downOn = e.target; });
   document.addEventListener('click', function (e) {
     var t = e.target;
-    if (t.classList && t.classList.contains('modal-overlay') && downOn === t) closeModal(t);
+    if (t.classList && t.classList.contains('modal-overlay') && downOn === t && topModal() === t) closeModal(t);
   });
   window.TaciModal = { close: closeModal };
 })();
