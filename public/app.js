@@ -87,23 +87,16 @@
   function flag(cc) { return flagIcon(cc); } // returns HTML now (img), never a text emoji
   var NAMES = { DE: 'Germany', AT: 'Austria', CH: 'Switzerland', GB: 'United Kingdom', US: 'United States', FR: 'France', NL: 'Netherlands', ES: 'Spain', IT: 'Italy', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland', CZ: 'Czechia', BE: 'Belgium', IE: 'Ireland', PT: 'Portugal', CA: 'Canada', AU: 'Australia', BR: 'Brazil', IN: 'India', JP: 'Japan', CN: 'China', RU: 'Russia', TR: 'Turkey', MX: 'Mexico', HU: 'Hungary', RO: 'Romania', GR: 'Greece', UA: 'Ukraine', HR: 'Croatia', NZ: 'New Zealand', SG: 'Singapore', KR: 'South Korea', IL: 'Israel', AE: 'UAE', ZA: 'South Africa' };
 
-  // ── login ──
-  function showLogin() { $('login').classList.remove('hide'); $('app').classList.add('hide'); }
+  // ── login (the form itself lives in account.js: passphrase, accounts, TOTP, passkeys) ──
+  function showLogin() { clearInterval(window.__rt); $('login').classList.remove('hide'); $('app').classList.add('hide'); if (window.TaciAccount) window.TaciAccount.prepareLogin(); }
   function hideLogin() { $('login').classList.add('hide'); $('app').classList.remove('hide'); }
-  function login() {
-    var pw = $('pw').value;
-    fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
-        if (!res.ok) { $('loginErr').textContent = res.j.error || 'Wrong password'; return; }
-        TOKEN = res.j.token; localStorage.setItem('nyx_token', TOKEN); $('loginErr').textContent = '';
-        boot();
-      })
-      .catch(function () { $('loginErr').textContent = 'Connection error'; });
-  }
-  $('loginBtn').onclick = login;
-  $('pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
-  $('logoutBtn').onclick = function () { localStorage.removeItem('nyx_token'); TOKEN = ''; showLogin(); };
+  function signedIn(token) { TOKEN = token; localStorage.setItem('nyx_token', TOKEN); $('loginErr').textContent = ''; boot(); }
+  $('logoutBtn').onclick = function () {
+    fetch('/auth/logout', { method: 'POST', headers: { 'x-session-token': TOKEN } }).catch(function () {});
+    localStorage.removeItem('nyx_token'); TOKEN = ''; showLogin();
+  };
+  // hooks for account.js
+  window.Taci = { api: api, esc: esc, ico: ico, signedIn: signedIn, sites: function () { return state.sites; }, reloadSites: function () { return loadSites().then(load); } };
 
   // ── sites ──
   function loadSites() {
@@ -758,6 +751,7 @@
 
   function boot() {
     hideLogin();
+    if (window.TaciAccount) window.TaciAccount.afterBoot();
     syncLegend();
     loadSites().then(function () { load(); loadFunnels(); });
     // live dashboard: refresh every 15s while the tab is visible
@@ -776,7 +770,7 @@
       state.site = info.domain;
       var sel = $('siteSelect');
       sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
-      ['addSiteBtn', 'logoutBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
       syncLegend();
       load();
       clearInterval(window.__rt);
@@ -784,5 +778,8 @@
     });
   }
 
-  if (SHARE) bootShare(); else if (TOKEN) boot(); else showLogin();
+  var INVITE = (location.pathname.match(/^\/invite\/([a-f0-9]{32,64})$/) || [])[1] || '';
+  if (SHARE) bootShare();
+  else if (INVITE) { $('login').classList.add('hide'); window.TaciAccount.showInvite(INVITE); }
+  else if (TOKEN) boot(); else showLogin();
 })();

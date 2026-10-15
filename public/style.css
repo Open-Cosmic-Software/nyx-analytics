@@ -413,3 +413,42 @@ header::after { content: ""; position: absolute; left: 18px; right: 18px; bottom
 /* native dropdown lists follow the dark theme (otherwise light text on a white popup) */
 select { color-scheme: dark; }
 select option { background: #0c1a1d; color: var(--text); }
+
+/* ── settings: security + team (2.1) ───────────────────────────────────────── */
+.modal.settings { text-align: left; max-width: 680px; }
+.settings-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+.settings-head h2 { margin: 0; }
+.set-tabs { margin-left: auto; display: inline-flex; gap: 2px; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+.set-tabs button { background: transparent; border: none; color: var(--text-dim); padding: 6px 12px; border-radius: 7px; cursor: pointer; font: 550 0.8rem inherit; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+.set-tabs button.active { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.set-card { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 12px; background: rgba(255,255,255,.02); }
+.set-card h3 { font-size: 0.95rem; font-weight: 650; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+.set-card p { margin-bottom: 12px; font-size: 0.84rem; }
+.modal .set-card input, .modal .set-card select { text-align: left; margin-bottom: 0; }
+.modal .set-card .btn { width: auto; padding: 9px 14px; }
+.set-card > input { margin-bottom: 10px !important; display: block; }
+.set-card > .btn { width: 100%; }
+.set-inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.set-inline input, .set-inline select { flex: 1 1 160px; min-width: 0; }
+.set-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 0.86rem; }
+.set-row:first-of-type { border-top: none; }
+.set-row > span:first-child { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.team-row > span:first-child { display: block; }
+.team-row select { width: auto; padding: 6px 8px; font-size: 0.8rem; }
+.row-actions { display: inline-flex; gap: 6px; }
+.btn.mini, .modal .btn.mini { padding: 5px 10px; font-size: 0.76rem; width: auto; }
+.small { font-size: 0.76rem; }
+.pill { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--line-strong); color: var(--text-dim); }
+.totp-qr { display: grid; place-items: center; margin: 6px 0 10px; }
+.totp-qr img { width: 180px; height: 180px; background: #fff; border-radius: 12px; padding: 8px; }
+.snippet.center { text-align: center; letter-spacing: .08em; }
+.snippet.recovery { columns: 2; text-align: center; font-size: 0.86rem; line-height: 1.9; }
+.site-pick { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 4px; font-size: 0.82rem; }
+.site-pick label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.modal .site-pick input { width: auto; margin: 0; accent-color: var(--accent-strong, var(--accent)); }
+.site-edit { padding: 4px 0 10px; }
+#user, #pw { margin-bottom: 10px; }
+#login .btn.ghost .ico, #settingsBtn .ico { margin-right: 6px; }
+/* viewers: hide everything that would only answer with 403 */
+body.role-viewer #addSiteBtn, body.role-viewer #shareBtn, body.role-viewer #addFunnelBtn { display: none !important; }
+@media (max-width: 560px) { #meName { display: none; } .team-row { flex-wrap: wrap; } }
