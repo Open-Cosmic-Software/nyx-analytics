@@ -134,3 +134,16 @@ test('a day whose midnight does not exist starts at its first local instant', ()
     }
   }
 });
+
+// Kiro's sweep (Rudel 11:17Z): every Intl zone × every day of 2026. Old dayStart broke 3 days
+// (America/Havana 8 Mar, America/Santiago 6 Sep, Atlantic/Azores 29 Mar); ~5 s thanks to the formatter cache.
+test('every Intl zone, every day of 2026: day boundaries are consistent', () => {
+  const bad = [];
+  for (const z of Intl.supportedValuesOf('timeZone')) {
+    for (let d = '2026-01-01'; d <= '2026-12-31'; d = tz.addDays(d, 1)) {
+      const s = tz.dayStart(z, d);
+      if (tz.localDay(z, s) !== d || tz.localDay(z, s - 60000) !== tz.addDays(d, -1) || !(tz.dayStart(z, tz.addDays(d, 1)) > s)) bad.push(z + ' ' + d);
+    }
+  }
+  assert.deepStrictEqual(bad, []);
+});
