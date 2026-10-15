@@ -432,6 +432,9 @@ const sitesCreateHandler = (req, res) => {
     return res.json(existing);
   }
   const info = insSite.run(domain, (req.body && req.body.name) || displayName, Date.now(), timezone);
+  // defensive: if INSERT OR IGNORE did nothing (e.g. a second process sharing the DB won the domain), lastInsertRowid is
+  // stale and must never be granted. Not reachable over HTTP in one process (the handler is synchronous), so no test.
+  if (!info.changes) return res.status(409).json({ error: 'This domain is already registered' });
   grantSite(req, Number(info.lastInsertRowid));
   audit(res, 'site.add', domain);
   res.json(getSiteByDomain.get(domain));
@@ -463,6 +466,8 @@ app.patch('/api/sites/:id', adminOnly, (req, res) => {
 app.delete('/api/sites/:id', adminOnly, (req, res) => {
   const id = Number(req.params.id);
   if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
+  // hard delete frees the domain and resets usage: only the operator (unlimited admin/owner) may do it (Tyto/Kiro, 2.3.0)
+  if (isLimited(req)) return res.status(403).json({ error: 'Your role does not allow this' });
   const gone = db.prepare('SELECT domain FROM sites WHERE id = ?').get(id);
   audit(res, 'site.remove', gone ? gone.domain : '#' + id);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);

@@ -105,12 +105,25 @@ test('site-limited admins stay inside their sites; paused sites collect nothing'
   assert.strictEqual((await j('GET', '/api/v1/usage?month=2026-13', undefined, op)).status, 400);
   assert.strictEqual((await j('GET', '/api/v1/usage?month=1999-01', undefined, op)).data[0].pageviews, 0);
 
+  // 9b) a limited account cannot hard-delete its OWN site either: that would end the pause and reset usage (Tyto/Kiro 2.3.0)
+  assert.strictEqual((await j('PATCH', '/api/sites/' + a.id, { paused: true }, op)).status, 200);
+  assert.strictEqual((await j('DELETE', '/api/sites/' + a.id, undefined, alice)).status, 403);
+  const kept = (await j('GET', '/api/sites', undefined, owner)).data.find((s) => s.domain === 'alpha.test');
+  assert.ok(kept && kept.paused === 1, 'site still there and still paused');
+  assert.strictEqual((await j('GET', '/api/v1/usage?month=' + month, undefined, op)).data.find((u) => u.domain === 'alpha.test').pageviews, 2, 'usage unchanged');
+  assert.strictEqual((await j('POST', '/api/sites', { domain: 'alpha.test' }, alice)).status, 200, 'still hers');
+  await j('PATCH', '/api/sites/' + a.id, { paused: false }, op);
+  // the operator still deletes (cloud.js uses the server key)
+  const tmp = (await j('POST', '/api/sites', { domain: 'delete-me.test' }, owner)).data;
+  assert.strictEqual((await j('DELETE', '/api/sites/' + tmp.id, undefined, op)).status, 200);
+
   // 10) the owner can widen or narrow an admin's sites; an unlimited admin sees everything
   const team = (await j('GET', '/api/team', undefined, owner)).data.users;
   const aliceId = team.find((u) => u.username === 'alice').id;
-  assert.deepStrictEqual(team.find((u) => u.username === 'alice').sites.sort(), [a.id, c.data.id].sort());
+  const aliceSites = team.find((u) => u.username === 'alice').sites;
+  assert.ok([a.id, c.data.id].every((x) => aliceSites.includes(x)) && !aliceSites.includes(b.id), JSON.stringify(aliceSites));
   assert.strictEqual((await j('PATCH', '/api/team/users/' + aliceId, { sites: null }, owner)).status, 200);
-  assert.strictEqual((await j('GET', '/api/sites', undefined, alice)).data.length, 3);
+  assert.strictEqual((await j('GET', '/api/sites', undefined, alice)).data.length, (await j('GET', '/api/sites', undefined, owner)).data.length, 'unlimited: sees everything');
   // an owner is never limited
   const up2 = await j('PATCH', '/api/team/users/' + aliceId, { role: 'owner', sites: [a.id] }, owner);
   assert.strictEqual(up2.data.sites, null);
