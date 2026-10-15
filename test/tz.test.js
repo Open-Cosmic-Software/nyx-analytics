@@ -122,12 +122,15 @@ test('a day whose midnight does not exist starts at its first local instant', ()
   assert.strictEqual(tz.localDay('America/Santiago', s - 60000), '2026-09-05');
   assert.strictEqual((tz.dayStart('America/Santiago', '2026-09-07') - s) / 36e5, 23);
   assert.strictEqual((s - tz.dayStart('America/Santiago', '2026-09-05')) / 36e5, 24);
+  // Tyto (Rudel 11:15Z): Beirut 29 Mar 2026 jumps 00:00 → 01:00 as well; the day starts 22:00Z = 01:00 local
+  assert.strictEqual(new Date(tz.dayStart('Asia/Beirut', '2026-03-29')).toISOString(), '2026-03-28T22:00:00.000Z');
   // every day boundary of a year in such zones is consistent: start belongs to the day, start-1min does not
-  for (const z of ['America/Santiago', 'Asia/Beirut', 'America/Havana', 'Europe/Berlin']) {
+  for (const z of ['America/Santiago', 'Asia/Beirut', 'America/Havana', 'Europe/Berlin', 'Asia/Kathmandu', 'Australia/Lord_Howe']) {
     for (let d = '2026-01-01'; d <= '2027-12-31'; d = tz.addDays(d, 1)) {
       const t = tz.dayStart(z, d);
       assert.strictEqual(tz.localDay(z, t), d, z + ' ' + d);
       assert.strictEqual(tz.localDay(z, t - 60000), tz.addDays(d, -1), z + ' ' + d + ' -1min');
+      assert.ok(tz.dayStart(z, tz.addDays(d, 1)) > t, z + ' ' + d + ' next day starts later');
     }
   }
 });
