@@ -535,3 +535,14 @@ html[data-theme="light"] .stat .label { color: #3f5a56; }
 .modal.settings .settings-head { position: sticky; top: -32px; z-index: 3; margin: -32px -30px 12px; padding: 22px 30px 12px;
   background: rgb(23,26,34); border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0; }
 html[data-theme="light"] .modal.settings .settings-head { background: #fff; }
+
+/* scrollbars in Tacilytics style — thin, quiet, follows light/dark (Fabian, 2.2.0) */
+:root { --sb-thumb: rgba(180, 255, 240, 0.16); --sb-thumb-hover: rgba(180, 255, 240, 0.32); }
+html[data-theme="light"] { --sb-thumb: rgba(10, 40, 38, 0.18); --sb-thumb-hover: rgba(10, 40, 38, 0.34); }
+* { scrollbar-width: thin; scrollbar-color: var(--sb-thumb) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sb-thumb); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+.modal::-webkit-scrollbar-track { margin: 14px 0; } /* keeps the thumb off the rounded corners */
