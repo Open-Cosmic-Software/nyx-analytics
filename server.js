@@ -236,7 +236,7 @@ if (TRUST_PROXY > 0) {
   app.use((req, _res, next) => {
     if (!warnedNoXff && !req.headers['x-forwarded-for']) {
       warnedNoXff = true;
-      console.warn(`⚠️  TRUST_PROXY=${TRUST_PROXY}, but a request arrived without X-Forwarded-For (from ${req.socket.remoteAddress}, ${req.method} ${req.path}, ${new Date().toISOString()}). Ignore this if it was a local request (curl, health check, a script on this server). Only if a TCP forwarder (socat, ssh -L) is in front of Tacilytics, set TRUST_PROXY=0.`);
+      console.warn(`⚠️  TRUST_PROXY=${TRUST_PROXY}, but a request arrived without X-Forwarded-For (from ${req.socket.remoteAddress}, ${req.method} ${req.path}, ${new Date().toISOString()}). Harmless for local health checks/CLI or an ssh -L to the dashboard. Only if ALL traffic comes through a TCP forwarder (socat, ssh -L), set TRUST_PROXY=0.`);
     }
     next();
   });
