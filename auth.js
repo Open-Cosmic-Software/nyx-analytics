@@ -28,22 +28,29 @@ function safeEq(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
-function hashPassword(pw) {
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+const scryptAsync = (pw, salt, len, o) => new Promise((ok, no) => crypto.scrypt(pw, salt, len, o, (e, k) => (e ? no(e) : ok(k))));
+function fmtHash(salt, h) { return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('base64')}$${h.toString('base64')}`; }
+// sync variants: only for module start and the offline CLI (no event loop to block there)
+function hashPasswordSync(pw) {
   const salt = crypto.randomBytes(16);
-  const N = 16384, r = 8, p = 1;
-  const h = crypto.scryptSync(String(pw), salt, 32, { N, r, p });
-  return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${h.toString('base64')}`;
+  return fmtHash(salt, crypto.scryptSync(String(pw), salt, 32, SCRYPT));
 }
-function verifyPassword(pw, stored) {
+// async variants: everything that runs inside a request, so a login never blocks /api/collect
+async function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  return fmtHash(salt, await scryptAsync(String(pw), salt, 32, SCRYPT));
+}
+async function verifyPassword(pw, stored) {
   const parts = String(stored || '').split('$');
   if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
   const [, N, r, p, salt, hash] = parts;
   const want = Buffer.from(hash, 'base64');
-  const got = crypto.scryptSync(String(pw), Buffer.from(salt, 'base64'), want.length, { N: +N, r: +r, p: +p });
+  const got = await scryptAsync(String(pw), Buffer.from(salt, 'base64'), want.length, { N: +N, r: +r, p: +p });
   return crypto.timingSafeEqual(got, want);
 }
 // a fixed dummy hash so unknown usernames cost the same time as wrong passwords
-const DUMMY_HASH = hashPassword(randToken());
+const DUMMY_HASH = hashPasswordSync(randToken());
 
 // ── TOTP (RFC 6238: HMAC-SHA1, 30 s, 6 digits) ────────────────────────────
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -162,6 +169,9 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     pkGet: db.prepare('SELECT * FROM passkeys WHERE id = ?'),
   };
   const hasUsers = () => q.userCount.get().n > 0;
+  if (hasUsers() && !process.env.TACILYTICS_ORIGIN) {
+    console.warn('⚠️  TACILYTICS_ORIGIN is not set. Passkeys use the request host, so they break if the dashboard is reached under another host/port or behind a proxy without X-Forwarded-Proto. Set it to the public dashboard URL.');
+  }
   setInterval(() => q.sessPurge.run(Date.now()), 3600e3).unref();
 
   // ── sessions ──
@@ -238,9 +248,15 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   }
   // short-lived in-memory state: login tickets (password ok, waiting for TOTP) + WebAuthn challenges
   const pending = new Map();
-  function putPending(kind, data, ms = 5 * 60000) {
+  const PENDING_MAX = 10000; // hard cap: /auth/passkey/options is unauthenticated, the map must not grow without bound
+  function putPending(kind, data, ms = 5 * 60000, expires = null) {
+    if (pending.size >= PENDING_MAX) {
+      const n = Date.now();
+      for (const [k, v] of pending) if (v.expires < n) pending.delete(k);
+      if (pending.size >= PENDING_MAX) return null;
+    }
     const id = randToken(16);
-    pending.set(id, { kind, data, expires: Date.now() + ms });
+    pending.set(id, { kind, data, expires: expires || Date.now() + ms });
     return id;
   }
   function takePending(id, kind) {
@@ -248,8 +264,10 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!e) return null;
     pending.delete(String(id));
     if (e.kind !== kind || e.expires < Date.now()) return null;
-    return e.data;
+    return { ...e.data, expires: e.expires };
   }
+  const BUSY = (res) => res.status(503).json({ error: 'Too many sign-ins in progress — try again in a minute' });
+  const TOTP_TRIES = 5; // wrong codes per password entry; after that the password is needed again
   setInterval(() => { const n = Date.now(); for (const [k, v] of pending) if (v.expires < n) pending.delete(k); }, 60000).unref();
 
   function checkSecondFactor(u, code) {
@@ -274,7 +292,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   // ── public auth endpoints ──────────────────────────────────────────────────
   app.get('/auth/status', (_req, res) => res.json({ accounts: hasUsers() }));
 
-  app.post('/auth/login', (req, res) => {
+  app.post('/auth/login', async (req, res) => {
     const ip = clientIp(req);
     if (rateLimited('login:' + ip, 10, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
     const b = req.body || {};
@@ -286,9 +304,12 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const name = cleanName(b.username);
     if (name && rateLimited('login-user:' + name.toLowerCase(), 20, 60 * 60000)) return res.status(429).json({ error: 'Too many attempts for this account — wait an hour' });
     const u = name ? q.userByName.get(name) : null;
-    const ok = verifyPassword(pw, u ? u.pw_hash : DUMMY_HASH) && !!u;
+    const ok = (await verifyPassword(pw, u ? u.pw_hash : DUMMY_HASH)) && !!u;
     if (!ok) return res.status(401).json({ error: 'Wrong username or password' });
-    if (u.totp_secret) return res.json({ mfa: 'totp', ticket: putPending('mfa', { userId: u.id }) });
+    if (u.totp_secret) {
+      const ticket = putPending('mfa', { userId: u.id, tries: 0 });
+      return ticket ? res.json({ mfa: 'totp', ticket }) : BUSY(res);
+    }
     res.json({ token: createSession(u.id) });
   });
 
@@ -299,9 +320,14 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!t) return res.status(401).json({ error: 'Sign-in expired — enter your password again' });
     const u = q.userById.get(t.userId);
     if (!u || !u.totp_secret) return res.status(401).json({ error: 'Sign-in expired — enter your password again' });
+    // per account, independent of the IP: guessing codes from many addresses does not help
+    if (rateLimited('totp-user:' + u.id, 10, 15 * 60000)) return res.status(429).json({ error: 'Too many wrong codes for this account — wait 15 minutes' });
     if (!checkSecondFactor(u, b.code)) {
-      // one more try with the same ticket, without re-entering the password
-      return res.status(401).json({ error: 'Wrong code', ticket: putPending('mfa', { userId: u.id }) });
+      const tries = (t.tries || 0) + 1;
+      if (tries >= TOTP_TRIES) return res.status(401).json({ error: 'Too many wrong codes — enter your password again' });
+      // one more try without re-entering the password; the successor keeps the original expiry and the count
+      const ticket = putPending('mfa', { userId: u.id, tries }, 0, t.expires);
+      return res.status(401).json(ticket ? { error: 'Wrong code', ticket } : { error: 'Wrong code — enter your password again' });
     }
     res.json({ token: createSession(u.id) });
   });
@@ -311,7 +337,9 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!hasUsers()) return res.status(400).json({ error: 'No accounts yet' });
     const { rpID } = rpFor(req);
     const options = await webauthn.generateAuthenticationOptions({ rpID, userVerification: 'preferred' });
-    res.json({ options, ticket: putPending('pk-auth', { challenge: options.challenge }) });
+    const ticket = putPending('pk-auth', { challenge: options.challenge });
+    if (!ticket) return BUSY(res);
+    res.json({ options, ticket });
   });
   app.post('/auth/passkey/verify', async (req, res) => {
     if (rateLimited('pk:' + clientIp(req), 30, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
@@ -358,21 +386,24 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!inv) return res.status(404).json({ error: 'This invite link is invalid, used or expired' });
     res.json({ role: inv.role, expires: inv.expires });
   });
-  app.post('/api/invite/:token', (req, res) => {
+  app.post('/api/invite/:token', async (req, res) => {
     if (rateLimited('inv:' + clientIp(req), 30, 15 * 60000)) return res.status(429).json({ error: 'Too many attempts — wait 15 minutes' });
     const b = req.body || {};
     const name = cleanName(b.username), pw = String(b.password || '');
     if (!validName(name)) return res.status(400).json({ error: 'Username: 2–40 characters, letters, digits, . _ @ -' });
     if (pw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
     if (q.userByName.get(name)) return res.status(409).json({ error: 'This username is taken' });
+    const pwHash = await hashPassword(pw);
     const tx = db.transaction(() => {
       const inv = inviteByToken(req.params.token);
       if (!inv) return null;
-      const info = q.insUser.run(name, hashPassword(pw), inv.role, inv.sites, b64u(crypto.randomBytes(16)), Date.now());
+      if (q.userByName.get(name)) return 'taken'; // re-checked inside the transaction (two sign-ups racing for one name)
+      const info = q.insUser.run(name, pwHash, inv.role, inv.sites, b64u(crypto.randomBytes(16)), Date.now());
       db.prepare('UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?').run(Date.now(), info.lastInsertRowid, inv.id);
       return info.lastInsertRowid;
     });
     const uid = tx();
+    if (uid === 'taken') return res.status(409).json({ error: 'This username is taken' });
     if (!uid) return res.status(404).json({ error: 'This invite link is invalid, used or expired' });
     res.json({ token: createSession(uid) });
   });
@@ -391,18 +422,18 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     res.json(out);
   });
   const userOnly = (req, res, next) => (req.principal.user ? next() : res.status(400).json({ error: 'Create an account first' }));
-  function needPassword(req, res) {
+  async function needPassword(req, res) {
     if (rateLimited('reauth:' + req.principal.user.id, 10, 15 * 60000)) { res.status(429).json({ error: 'Too many attempts — wait 15 minutes' }); return false; }
     const u = q.userById.get(req.principal.user.id);
-    if (!verifyPassword(String((req.body || {}).password || ''), u.pw_hash)) { res.status(401).json({ error: 'Wrong password' }); return false; }
+    if (!(await verifyPassword(String((req.body || {}).password || ''), u.pw_hash))) { res.status(401).json({ error: 'Wrong password' }); return false; }
     return true;
   }
 
-  app.post('/api/me/password', auth, userOnly, (req, res) => {
-    if (!needPassword(req, res)) return;
+  app.post('/api/me/password', auth, userOnly, async (req, res) => {
+    if (!(await needPassword(req, res))) return;
     const npw = String((req.body || {}).newPassword || '');
     if (npw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
-    db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(hashPassword(npw), req.principal.user.id);
+    db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(await hashPassword(npw), req.principal.user.id);
     q.sessDelUserExcept.run(req.principal.user.id, req.principal.tokenHash); // sign out other devices
     res.json({ ok: true });
   });
@@ -431,13 +462,13 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     q.sessDelUserExcept.run(u.id, req.principal.tokenHash);
     res.json({ ok: true, recoveryCodes: codes });
   });
-  app.post('/api/me/totp/disable', auth, userOnly, (req, res) => {
-    if (!needPassword(req, res)) return;
+  app.post('/api/me/totp/disable', auth, userOnly, async (req, res) => {
+    if (!(await needPassword(req, res))) return;
     db.prepare('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(req.principal.user.id);
     res.json({ ok: true });
   });
-  app.post('/api/me/recovery', auth, userOnly, (req, res) => {
-    if (!needPassword(req, res)) return;
+  app.post('/api/me/recovery', auth, userOnly, async (req, res) => {
+    if (!(await needPassword(req, res))) return;
     const u = q.userById.get(req.principal.user.id);
     if (!u.totp_secret) return res.status(400).json({ error: '2FA is off' });
     const codes = newRecoveryCodes();
@@ -455,7 +486,9 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       excludeCredentials: existing.map((k) => ({ id: k.id, transports: k.transports ? JSON.parse(k.transports) : undefined })),
       authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
     });
-    res.json({ options, ticket: putPending('pk-reg', { challenge: options.challenge, userId: u.id }) });
+    const ticket = putPending('pk-reg', { challenge: options.challenge, userId: u.id });
+    if (!ticket) return BUSY(res);
+    res.json({ options, ticket });
   });
   app.post('/api/me/passkeys', auth, userOnly, async (req, res) => {
     const b = req.body || {};
@@ -483,13 +516,13 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   const ownerOnly = requireRole('owner');
 
   // first account: only from a legacy (WEB_PASSWORD) or API-key session, only while there are none
-  app.post('/api/team/bootstrap', ownerOnly, (req, res) => {
+  app.post('/api/team/bootstrap', ownerOnly, async (req, res) => {
     if (hasUsers()) return res.status(409).json({ error: 'Accounts already exist' });
     const b = req.body || {};
     const name = cleanName(b.username), pw = String(b.password || '');
     if (!validName(name)) return res.status(400).json({ error: 'Username: 2–40 characters, letters, digits, . _ @ -' });
     if (pw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
-    const info = q.insUser.run(name, hashPassword(pw), 'owner', null, b64u(crypto.randomBytes(16)), Date.now());
+    const info = q.insUser.run(name, await hashPassword(pw), 'owner', null, b64u(crypto.randomBytes(16)), Date.now());
     q.sessDelLegacy.run(); // WEB_PASSWORD sessions end here
     res.json({ token: createSession(info.lastInsertRowid) });
   });
@@ -565,11 +598,11 @@ function adminOps(db) {
       const u = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(String(username));
       if (!u) throw new Error('Unknown user: ' + username);
       const pw = crypto.randomBytes(12).toString('base64url');
-      db.prepare('UPDATE users SET pw_hash = ?, totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(hashPassword(pw), u.id);
+      db.prepare('UPDATE users SET pw_hash = ?, totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(hashPasswordSync(pw), u.id);
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
       return pw;
     },
   };
 }
 
-module.exports = { setupAuth, adminOps, _test: { hashPassword, verifyPassword, totpAt, totpCheck, base32Encode, base32Decode, newRecoveryCodes, normRecovery } };
+module.exports = { setupAuth, adminOps, _test: { hashPassword, hashPasswordSync, verifyPassword, totpAt, totpCheck, base32Encode, base32Decode, newRecoveryCodes, normRecovery } };

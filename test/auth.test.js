@@ -25,13 +25,14 @@ test('TOTP matches RFC 6238 vectors', () => {
   assert.strictEqual(A.totpCheck(secret, '287083', 59 * 1000), -1);
   assert.strictEqual(A.totpCheck(secret, 'abcdef', 59 * 1000), -1);
 });
-test('base32 round trip + password hashing', () => {
+test('base32 round trip + password hashing', async () => {
   const b = crypto.randomBytes(20);
   assert.deepStrictEqual(A.base32Decode(A.base32Encode(b)), b);
-  const h = A.hashPassword('correct horse');
-  assert.ok(A.verifyPassword('correct horse', h));
-  assert.ok(!A.verifyPassword('correct horsf', h));
-  assert.ok(!A.verifyPassword('x', 'garbage'));
+  const h = await A.hashPassword('correct horse');
+  assert.ok(await A.verifyPassword('correct horse', h));
+  assert.ok(!(await A.verifyPassword('correct horsf', h)));
+  assert.ok(!(await A.verifyPassword('x', 'garbage')));
+  assert.ok(await A.verifyPassword('battery staple', A.hashPasswordSync('battery staple')));
   const codes = A.newRecoveryCodes();
   assert.strictEqual(codes.length, 10);
   assert.strictEqual(new Set(codes).size, 10);
@@ -103,8 +104,9 @@ async function start() {
 }
 async function stop() { if (!proc) return; const p = proc; proc = null; if (p.exitCode === null) { p.kill('SIGTERM'); await new Promise((r) => p.on('exit', r)); } }
 let ipN = 0;
-async function call(method, p, { token, body, key } = {}) {
-  const headers = { 'Content-Type': 'application/json', 'X-Forwarded-For': `198.51.100.${(ipN++ % 250) + 1}` };
+async function call(method, p, { token, body, key, xff } = {}) {
+  // default: a proxy appends a different client address per call (keeps the IP limits out of the way)
+  const headers = { 'Content-Type': 'application/json', 'X-Forwarded-For': xff || `198.51.100.${(ipN++ % 250) + 1}` };
   if (token) headers['x-session-token'] = token;
   if (key) headers.Authorization = 'Bearer ' + key;
   const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
@@ -226,6 +228,29 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
   await t.test('TOTP step needs a valid ticket', () => assert.strictEqual(r.status, 401));
   r = await call('GET', '/api/me', { token: owner });
   await t.test('/api/me shows 2FA on and 9 recovery codes left', () => { assert.strictEqual(r.j.totp, true); assert.strictEqual(r.j.recoveryLeft, 9); });
+
+  // brute-force guards (Tyto's review of 2.1.0): a client-chosen first X-Forwarded-For entry must not reset the limits
+  {
+    let last = null;
+    for (let i = 1; i <= 11; i++) {
+      last = await call('POST', '/auth/login', { body: { username: 'ghost' + i, password: 'x' }, xff: `10.66.${i}.1, 203.0.113.99` });
+    }
+    await t.test('login IP limit holds when the client rotates its own X-Forwarded-For entry', () => assert.strictEqual(last.status, 429));
+  }
+  {
+    r = await call('POST', '/auth/login', { body: { username: 'fabi', password: 'owner-password-1' } });
+    let tk = r.j.ticket, res = null;
+    const wrong = (n) => { let c = String(100000 + n); while (A.totpCheck(secret, c) >= 0) c = String(+c + 1); return c; };
+    for (let i = 1; i <= 5; i++) {
+      res = await call('POST', '/auth/login/totp', { body: { ticket: tk, code: wrong(i) } }); // new address every call
+      if (i < 5) { assert.strictEqual(res.status, 401); assert.ok(res.j.ticket, 'try ' + i + ' should hand out a successor ticket'); tk = res.j.ticket; }
+    }
+    await t.test('TOTP: after 5 wrong codes the password is needed again (no new ticket)', () => {
+      assert.strictEqual(res.status, 401); assert.ok(!res.j.ticket); assert.match(res.j.error, /password/i);
+    });
+    res = await call('POST', '/auth/login/totp', { body: { ticket: tk, code: totpNow(secret) } });
+    await t.test('TOTP: the last ticket of the chain is spent', () => assert.strictEqual(res.status, 401));
+  }
 
   // passkeys
   const key = new SoftAuthenticator();

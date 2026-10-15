@@ -239,6 +239,7 @@ The API key (`API_KEY`, Bearer) keeps owner rights for agents and the CLI.
 | `PORT` | `3920` | Port (bound to 127.0.0.1) |
 | `WEB_PASSWORD` | `tacilytics` | Dashboard passphrase — **only until the first account exists** |
 | `TACILYTICS_ORIGIN` | request host | Public URL of the dashboard, e.g. `https://analytics.example.com`. Pins the passkey domain; recommended behind a proxy |
+| `TRUST_PROXY` | `1` | Number of reverse proxies in front of Tacilytics. Rate limits use the address the nearest trusted proxy saw, never the client-written first `X-Forwarded-For` entry. Set `0` if the server is reachable directly |
 | `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |

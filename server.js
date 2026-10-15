@@ -216,14 +216,16 @@ function visitorHash(siteId, ip, ua, day) {
   if (!salt) return crypto.randomBytes(12).toString('hex'); // unlinkable one-off visitor
   return crypto.createHash('sha256').update(`${INGEST_SALT}|${salt}|${day}|${siteId}|${ip}|${ua}`).digest('hex').slice(0, 24);
 }
+// The client writes the FIRST X-Forwarded-For entry itself, so it must never be used for rate limits.
+// req.ip honours 'trust proxy': with TRUST_PROXY=1 (default, one reverse proxy in front) it is the
+// entry that proxy appended. Set TRUST_PROXY=0 when the server is reachable without a proxy.
 function clientIp(req) {
-  const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return xff || req.socket.remoteAddress || '0.0.0.0';
+  return req.ip || req.socket.remoteAddress || '0.0.0.0';
 }
 
 // ── app ─────────────────────────────────────────────────────────────────────
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', Number.isFinite(+process.env.TRUST_PROXY) && process.env.TRUST_PROXY !== '' && process.env.TRUST_PROXY != null ? +process.env.TRUST_PROXY : 1);
 // Accept both application/json (dashboard) and text/plain (cross-origin beacons).
 app.use(express.json({ limit: '32kb', type: ['application/json', 'text/plain'] }));
 app.disable('x-powered-by');
