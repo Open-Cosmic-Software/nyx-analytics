@@ -67,6 +67,11 @@ test('one guard for both paths: webhookProblem and the connect-time lookup use i
   assert.match(src.slice(src.indexOf('function webhookProblem')), /isPrivateAddress\(h\)/);
   assert.match(src.slice(src.indexOf('function makeGuardedLookup')), /list\.some\(\(x\) => isPrivateAddress\(x\.address\)\)/);
 });
+test('Kiro: a trailing dot does not hide localhost / internal names', () => {
+  for (const u of ['https://localhost./', 'https://foo.localhost./', 'https://printer.local./', 'https://db.internal./', 'https://intranet./', 'https://localhost../'])
+    assert.strictEqual(webhookProblem(u), 'Webhook must point to a public address', u);
+  assert.strictEqual(webhookProblem('https://example.com./hook'), null, 'a public FQDN with trailing dot stays allowed');
+});
 test('Kiro (i): IP literal https://[64:ff9b::7f00:1]/ is refused by webhookProblem (Node skips lookup for literals)', () => {
   for (const u of ['https://[64:ff9b::7f00:1]/', 'https://198.18.0.1/', 'https://[fec0::1]/', 'https://224.0.0.1/', 'https://[::ffff:127.0.0.1]/'])
     assert.ok(webhookProblem(u), u);

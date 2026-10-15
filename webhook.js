@@ -60,7 +60,8 @@ function isPrivateAddress(a) {
 function webhookProblem(u) {
   let url; try { url = new URL(String(u)); } catch { return 'Enter a full https:// URL'; }
   if (url.protocol !== 'https:') return 'Webhook must use https://';
-  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  // 'localhost.' / 'foo.localhost.' are the same names (fully-qualified, trailing dot) — strip it before comparing
+  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   if (net.isIP(h)) return isPrivateAddress(h) ? 'Webhook must point to a public address' : null;
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || !h.includes('.')) return 'Webhook must point to a public address';
   return null;
