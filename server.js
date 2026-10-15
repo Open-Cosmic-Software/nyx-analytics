@@ -532,17 +532,20 @@ function whoDid(req) {
 }
 
 // ── imported history helpers ──
-const firstNativeDay = db.prepare('SELECT MIN(day) d FROM events WHERE site_id = ?');
+const firstNativeTs = db.prepare('SELECT MIN(ts) t FROM events WHERE site_id = ?');
+// first LOCAL day with own data in the site's time zone (import boundary — shown in the import dialog too)
+function firstOwnDay(site) { const t = firstNativeTs.get(site.id).t; return t == null ? null : TZ.localDay(site.timezone || 'UTC', t); }
 function importedFor(siteId, start, end, filtered, tz) {
   const exists = !!db.prepare('SELECT 1 FROM imports WHERE site_id = ? LIMIT 1').get(siteId);
   const off = { exists, on: false, filtered: exists && filtered, tot: { pageviews: 0, visitors: 0 }, days: [], top: () => [], until: null };
   if (!exists || filtered) return off;
-  // imported days count only before the first day with own data
-  const first = firstNativeDay.get(siteId).d;
+  // imported days count only before the first LOCAL day with own data (events.day is the UTC day)
+  const firstTs = firstNativeTs.get(siteId).t;
+  const first = firstTs == null ? null : TZ.localDay(tz, firstTs);
   // imported rows are calendar days of the source; they are matched against the site's local days
   const from = TZ.localDay(tz, start);
   const lastDay = TZ.localDay(tz, end - 1);
-  const to = first && first <= lastDay ? new Date(Date.parse(first + 'T00:00:00Z') - 864e5).toISOString().slice(0, 10) : lastDay;
+  const to = first && first <= lastDay ? TZ.addDays(first, -1) : lastDay;
   if (to < from) return { ...off, until: first };
   const days = db.prepare("SELECT day, SUM(visitors) visitors, SUM(pageviews) pageviews FROM imported WHERE site_id = ? AND dim = '' AND day >= ? AND day <= ? GROUP BY day").all(siteId, from, to);
   const tot = days.reduce((a, r) => ({ pageviews: a.pageviews + r.pageviews, visitors: a.visitors + r.visitors }), { pageviews: 0, visitors: 0 });
@@ -856,7 +859,7 @@ app.post('/api/imports', adminOnly, express.raw({ type: ['application/zip', 'app
   if (!rows.length) return res.status(400).json({ error: 'The file contains no daily numbers' });
   if (rows.length > 2e6) return res.status(400).json({ error: 'Too many rows' });
   const daysTot = rows.filter((r) => r.dim === '').map((r) => r.day).sort();
-  const first = firstNativeDay.get(site.id).d;
+  const first = firstOwnDay(site);
   const by = whoDid(req);
   const id = db.transaction(() => {
     const info = db.prepare('INSERT INTO imports (site_id, source, first_day, last_day, rows, pageviews, files, created_by, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -873,7 +876,7 @@ app.get('/api/imports', auth, (req, res) => {
   const site = getSiteByDomain.get(norm(req.query.site));
   if (!site) return res.status(404).json({ error: 'Unknown site' });
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
-  res.json({ countsUntil: firstNativeDay.get(site.id).d, imports: db.prepare('SELECT id, source, first_day, last_day, rows, pageviews, files, created_by, created FROM imports WHERE site_id = ? ORDER BY id DESC').all(site.id) });
+  res.json({ countsUntil: firstOwnDay(site), imports: db.prepare('SELECT id, source, first_day, last_day, rows, pageviews, files, created_by, created FROM imports WHERE site_id = ? ORDER BY id DESC').all(site.id) });
 });
 app.delete('/api/imports/:id', adminOnly, (req, res) => {
   const imp = db.prepare('SELECT * FROM imports WHERE id = ?').get(Number(req.params.id));

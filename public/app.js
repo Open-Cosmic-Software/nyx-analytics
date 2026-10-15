@@ -138,6 +138,8 @@
     sel.innerHTML = list.map(function (z) { return '<option value="' + esc(z) + '">' + esc(z.replace(/_/g, ' ')) + '</option>'; }).join('');
     sel.value = value;
   }
+  // today in the site's time zone (en-CA formats as YYYY-MM-DD)
+  function localToday() { var s = currentSite(); try { return new Intl.DateTimeFormat('en-CA', { timeZone: (s && s.timezone) || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch (e) { return new Date().toISOString().slice(0, 10); } }
   function currentSite() { return (state.sites || []).filter(function (s) { return s.domain === state.site; })[0]; }
   function showTz() { var s = currentSite(); $('tzName').textContent = s ? String(s.timezone || 'UTC').replace(/_/g, ' ') : 'UTC'; $('tzBtn').classList.toggle('hide', !s); }
   $('tzBtn').onclick = function () {
@@ -562,7 +564,7 @@
   // ── add / list annotations ──
   function openAnnotations() {
     $('annModal').classList.remove('hide'); $('annErr').textContent = '';
-    $('annDay').value = new Date().toISOString().slice(0, 10); $('annText').value = ''; $('annText').focus(); window.TaciModal.snapshot($('annModal')); // also when re-opened after a save
+    $('annDay').value = localToday(); $('annText').value = ''; $('annText').focus(); window.TaciModal.snapshot($('annModal')); // also when re-opened after a save
     api('/api/annotations?site=' + encodeURIComponent(state.site)).then(function (list) {
       $('annList').innerHTML = (list || []).length ? list.map(function (a) {
         return '<div class="set-row"><span><strong>' + esc(a.day) + '</strong> <span data-no-i18n>' + esc(a.text) + '</span>' + (a.created_by ? ' <span class="muted small">· ' + esc(a.created_by) + '</span>' : '') + '</span>' +

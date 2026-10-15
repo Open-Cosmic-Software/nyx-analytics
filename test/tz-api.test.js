@@ -84,3 +84,26 @@ test('time zones: API', async (t) => {
     d.close();
   });
 });
+
+test('time zones: imported history ends before the first LOCAL day with own data', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taci-tzi-'));
+  const DB_PATH = path.join(dir, 'analytics.db');
+  const PORT = 46000 + Math.floor(Math.random() * 1000);
+  const KEY = 'tzi-' + crypto.randomBytes(4).toString('hex');
+  const ENV = { ...process.env, DB_PATH, PORT: String(PORT), DIGEST_WEBHOOK_URL: 'off', DATA_RETENTION_DAYS: '0', INGEST_SALT: 's', API_KEY: KEY, SESSION_SECRET: 'x', WEB_PASSWORD: 'tz-pass-12345', TRUST_PROXY: '0', TACILYTICS_ALERT_TICK: 'off' };
+  const proc = spawn(process.execPath, [path.join(ROOT, 'server.js')], { cwd: ROOT, env: ENV, stdio: ['ignore', 'ignore', 'pipe'] });
+  t.after(async () => { proc.kill('SIGTERM'); await new Promise((r) => proc.on('exit', r)); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${PORT}/nyx.js`); break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+  const call = async (method, p, body) => (await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json' }, body: body == null ? undefined : JSON.stringify(body) })).json();
+  const site = await call('POST', '/api/sites', { domain: 'imp.test', timezone: 'Europe/Berlin' });
+  const d = new Database(DB_PATH);
+  // own data starts 02.09. 23:30 UTC = 03.09. 01:30 Berlin → the local 02.09. still belongs to the import
+  d.prepare("INSERT INTO events (site_id, ts, day, path, vh) VALUES (?, ?, '2025-09-02', '/', 'own')").run(site.id, Date.parse('2025-09-02T23:30:00Z'));
+  const impId = d.prepare("INSERT INTO imports (site_id, source, created, first_day, last_day, rows) VALUES (?, 'ga', 0, '2025-09-01', '2025-09-03', 3)").run(site.id).lastInsertRowid;
+  const ins = d.prepare("INSERT INTO imported (import_id, site_id, day, dim, name, visitors, pageviews) VALUES (?, ?, ?, '', '', ?, ?)");
+  ins.run(impId, site.id, '2025-09-01', 10, 10); ins.run(impId, site.id, '2025-09-02', 20, 20); ins.run(impId, site.id, '2025-09-03', 30, 30);
+  d.close();
+  const j = await call('GET', '/api/stats?site=imp.test&from=2025-09-01&to=2025-09-03');
+  assert.deepStrictEqual(j.series.map((x) => [x.day, x.pageviews]), [['2025-09-01', 10], ['2025-09-02', 20], ['2025-09-03', 1]]);
+  assert.strictEqual((await call('GET', '/api/imports?site=imp.test')).countsUntil, '2025-09-03', 'the import dialog names the local day');
+});
