@@ -117,13 +117,15 @@ function createReport(db, { paymentHosts = [] } = {}) {
   }
 
   function build(user, sites, now, { publicUrl = '', lang = 'en' } = {}) {
-    const L = TXT[lang] || TXT.en;
+    if (!Object.hasOwn(TXT, lang)) lang = 'en'; // goes into <html lang> — valid no matter who calls
+    const L = TXT[lang];
     const nf = new Intl.NumberFormat(L.locale);
     const money = new Intl.NumberFormat(L.locale, { style: 'currency', currency: 'EUR' });
     const N = (x) => nf.format(x || 0);
     const regions = (() => { try { return new Intl.DisplayNames([L.locale], { type: 'region' }); } catch { return null; } })();
     const country = (cc) => (cc === '?' ? L.unknown : (regions && /^[A-Z]{2}$/.test(cc) ? regions.of(cc) : cc));
-    const srcName = (x) => (x === 'Direct' ? L.direct : SOURCE_NAMES[x] || x);
+    // own keys only: the source is visitor-controlled (referrer/utm) — 'constructor' must stay a string
+    const srcName = (x) => (x === 'Direct' ? L.direct : Object.hasOwn(SOURCE_NAMES, x) ? SOURCE_NAMES[x] : x);
     const devName = (x) => ({ Desktop: L.desktop, Mobile: L.mobile, Tablet: L.tablet }[x] || L.unknown);
     const dateFmt = (iso, o) => new Date(iso + 'T12:00:00Z').toLocaleDateString(L.locale, { timeZone: 'UTC', ...o });
     const pct = (a, b) => (!b ? (a ? L.new : '±0 %') : (a >= b ? '+' : '−') + Math.abs(Math.round(((a - b) / b) * 100)) + ' %');

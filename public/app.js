@@ -65,10 +65,13 @@
     var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
     return Math.max(r, g, b) < 90; // only near-black / deep navy marks; saturated reds stay
   }
+  // lookup tables keyed by visitor data (source, country, platform …): own keys only, so a source
+  // called 'constructor' or '__proto__' stays plain text instead of hitting Object.prototype
+  function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined; }
   function ico(id, cls) { return '<svg class="ico ' + (cls || '') + '" aria-hidden="true"><use href="' + SPRITE + '#' + id + '"></use></svg>'; }
   function brand(name, fallbackUi) {
     if (!name) return ico(fallbackUi || 'i-other', 'ui');
-    var c = BRAND_COLORS[name];
+    var c = own(BRAND_COLORS, name);
     if (name === 'samsung') c = '#6f8dff'; // Samsung navy is unreadable on dark — same hue, lighter
     if (c && isDark(c)) c = '#e7f3f1'; // black logos (Apple, X, GitHub …) would vanish on the dark UI
     return '<svg class="ico brand" aria-hidden="true"' + (c ? ' style="color:' + c + '"' : '') + '><use href="' + SPRITE + '#b-' + name + '"></use></svg>';
@@ -332,8 +335,8 @@
     el.classList.remove('hide');
     var chips = keys.map(function (k) {
       var v = state.filters[k];
-      var disp = k === 'country' ? (flagIcon(v) + ' ' + esc(NAMES[v] || v)) : k === 'platform' ? (platformIcon(v) + ' ' + esc(platformLabel(v))) : esc(v);
-      return '<span class="chip"><span class="k">' + esc(FILTER_LABELS[k] || k) + '</span>' + disp +
+      var disp = k === 'country' ? (flagIcon(v) + ' ' + esc(own(NAMES, v) || v)) : k === 'platform' ? (platformIcon(v) + ' ' + esc(platformLabel(v))) : esc(v);
+      return '<span class="chip"><span class="k">' + esc(own(FILTER_LABELS, k) || k) + '</span>' + disp +
         '<button data-rm="' + esc(k) + '" title="Remove" aria-label="Remove filter">' + ico('i-x', 'ui') + '</button></span>';
     }).join('');
     el.innerHTML = '<span class="flabel">Filtered by</span>' + chips + '<span class="chip clear" id="clearFilters">Clear all</span>';
@@ -558,8 +561,8 @@
     'android-app://com.google.android.googlequicksearchbox': 'Google App (Android)', 't.co': 'X / Twitter',
   };
   var PLATFORM_NAMES = { web: 'Web', android: 'Android app', ios: 'iOS app', macos: 'macOS app', windows: 'Windows app', linux: 'Linux app' };
-  function platformIcon(n) { return n === 'web' ? ico('i-web', 'ui') : n === 'windows' ? ico('i-desktop', 'ui') : brand(PLATFORM_ICON[n], 'i-mobile'); }
-  function platformLabel(n) { return PLATFORM_NAMES[n] || n; }
+  function platformIcon(n) { return n === 'web' ? ico('i-web', 'ui') : n === 'windows' ? ico('i-desktop', 'ui') : brand(own(PLATFORM_ICON, n), 'i-mobile'); }
+  function platformLabel(n) { return own(PLATFORM_NAMES, n) || n; }
   state.pfTab = 'platforms';
   function renderPlatformsPanel() {
     var s = lastStats; if (!s) return;
@@ -571,7 +574,7 @@
     if (state.pfTab === 'appVersions') bars('p-platforms', s.appVersions || [], { filterKey: 'version', icon: function () { return ico('i-layers', 'ui'); }, label: function (r) { return 'v' + r.name; } });
     else bars('p-platforms', s.platforms || [], { filterKey: 'platform', icon: function (r) { return platformIcon(r.name); }, label: function (r) { return platformLabel(r.name); } });
   }
-  function sourceLabel(n) { if (n === 'Direct') return 'Direct / none'; var nice = SOURCE_NAMES[n]; return nice ? nice + ' · ' + n : n; }
+  function sourceLabel(n) { if (n === 'Direct') return 'Direct / none'; var nice = own(SOURCE_NAMES, n); return nice ? nice + ' · ' + n : n; }
   function renderSourcesPanel() {
     var s = lastStats; if (!s) return;
     var tab = state.srcTab, fk = tab === 'mediums' ? 'medium' : tab === 'campaigns' ? 'campaign' : 'source';
@@ -700,9 +703,9 @@
       sparkline('s-pageviews', (s.series || []).map(function (d) { return d.pageviews; }), COL.p);
       renderPagesPanel();
       renderSourcesPanel();
-      bars('p-countries', s.countries, { filterKey: 'country', icon: function (r) { return flagIcon(r.name); }, label: function (r) { return NAMES[r.name] || r.name; } });
-      bars('p-browsers', s.browsers, { filterKey: 'browser', icon: function (r) { return r.name === 'App' ? ico('i-mobile', 'ui') : r.name === 'Edge' ? ico('i-browser', 'ui') : brand(BROWSER_ICON[r.name], 'i-browser'); } });
-      bars('p-os', s.os, { filterKey: 'os', icon: function (r) { return r.name === 'Windows' ? ico('i-desktop', 'ui') : brand(OS_ICON[r.name], 'i-os'); } });
+      bars('p-countries', s.countries, { filterKey: 'country', icon: function (r) { return flagIcon(r.name); }, label: function (r) { return own(NAMES, r.name) || r.name; } });
+      bars('p-browsers', s.browsers, { filterKey: 'browser', icon: function (r) { return r.name === 'App' ? ico('i-mobile', 'ui') : r.name === 'Edge' ? ico('i-browser', 'ui') : brand(own(BROWSER_ICON, r.name), 'i-browser'); } });
+      bars('p-os', s.os, { filterKey: 'os', icon: function (r) { return r.name === 'Windows' ? ico('i-desktop', 'ui') : brand(own(OS_ICON, r.name), 'i-os'); } });
       bars('p-devices', s.devices, { filterKey: 'device', icon: function (r) { return ico(r.name === 'Desktop' ? 'i-desktop' : r.name === 'Tablet' ? 'i-tablet' : 'i-mobile', 'ui'); } });
       renderPlatformsPanel();
       bars('p-languages', s.languages, { filterKey: 'lang' });

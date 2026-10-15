@@ -163,6 +163,23 @@ test('weekly report', async (t) => {
     assert.match(r.subject, /^a\.test: 30 Besucher letzte Woche \(\+50 %\)$/);
     assert.match(r.html, /🇦🇹 Österreich/);
   });
+  await t.test('visitor-controlled source names cannot reach Object.prototype; lang is validated', () => {
+    const Database2 = require('better-sqlite3');
+    const fs2 = require('fs'), os2 = require('os'), path2 = require('path');
+    const tmp = path2.join(fs2.mkdtempSync(path2.join(os2.tmpdir(), 'taci-rp-')), 'r.db');
+    { const src = new Database2(DB_PATH, { readonly: true }); src.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`); src.close(); } // the live test DB is WAL — copy via SQLite
+    const d = new Database2(tmp);
+    const ins = d.prepare('INSERT INTO events (site_id, ts, day, path, source, name, vh, country, device, props) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const [i, src] of ['constructor', '__proto__', 'toString', 'hasOwnProperty'].entries())
+      for (let k = 0; k < 9 - i; k++) ins.run(b.id, monday - 2 * day, new Date(monday - 2 * day).toISOString().slice(0, 10), '/', src, null, 'p' + i + '-' + k, null, null, null);
+    const { createReport } = require('../report');
+    const r = createReport(d).build({ username: 'fabi' }, [{ id: b.id, domain: 'b.test' }], monday, { lang: '"><script>x</script>', publicUrl: 'https://x.test' });
+    d.close(); fs2.rmSync(path2.dirname(tmp), { recursive: true, force: true });
+    for (const src of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) assert.match(r.text, new RegExp(src + ' \\(\\d+\\)'), src);
+    assert.ok(!/function|\[object Object\]|native code/.test(r.text + r.html), 'prototype leaked into the report');
+    assert.match(r.html, /<html lang="en">/);
+    assert.ok(!/<script>/.test(r.html));
+  });
   await t.test('a viewer only gets the sites they can see', () => {
     assert.match(toVera, /a\.test/);
     assert.ok(!/b\.test/.test(toVera), 'b.test leaked into the viewer report');
