@@ -160,10 +160,22 @@
   var ROLE_HELP = { owner: 'everything, including the team', admin: 'sites, share links and funnels', viewer: 'read only' };
   var me = null;
   function setErr(t) { $('setErr').textContent = t || ''; }
+  // footer version: only after sign-in (from /api/me), links to the release tag; strict format check so
+  // a strange value can never become markup or a link somewhere else
+  function showVersion(v) {
+    var el = $('appVersion'); if (!el) return;
+    el.textContent = '';
+    if (typeof v !== 'string' || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v)) return;
+    var a = document.createElement('a');
+    a.href = 'https://github.com/Open-Cosmic-Software/tacilytics/releases/tag/v' + v;
+    a.target = '_blank'; a.rel = 'noopener'; a.textContent = v;
+    el.appendChild(document.createTextNode(' ')); el.appendChild(a);
+  }
   function afterBoot() {
     call('GET', '/api/me').then(function (m) {
       me = m;
       $('meName').textContent = m.username || 'Settings';
+      showVersion(m.version);
       document.body.classList.toggle('role-viewer', m.role === 'viewer');
     }).catch(function () {});
   }

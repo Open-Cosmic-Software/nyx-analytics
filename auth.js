@@ -15,6 +15,7 @@
  * TOTP secrets are stored as-is (they must be readable to verify codes).
  */
 const crypto = require('crypto');
+const PKG_VERSION = require('./package.json').version;
 
 const ROLES = { viewer: 1, admin: 2, owner: 3 };
 const SESSION_DAYS = 30;
@@ -484,7 +485,9 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   // ── me ─────────────────────────────────────────────────────────────────────
   app.get('/api/me', auth, (req, res) => {
     const p = req.principal;
-    const out = { kind: p.kind, role: p.role, accounts: hasUsers() };
+    // version only behind auth: a public number would tell scanners which instances still run a release
+    // with a known hole (Tyto). Never in /auth/status, the login screen or share links.
+    const out = { kind: p.kind, role: p.role, accounts: hasUsers(), version: PKG_VERSION };
     if (p.user) {
       const u = q.userById.get(p.user.id);
       Object.assign(out, publicUser(u), {

@@ -129,6 +129,7 @@
     'reset the login (password, 2FA, sessions) of': 'hat die Anmeldung zurückgesetzt (Passwort, 2FA, Sitzungen) von',
     'Visitors on imported days are summed per day, not unique across days.': 'Besucher an importierten Tagen werden pro Tag summiert, nicht über Tage hinweg eindeutig gezählt.',
     'Tacilytics · open source ·': 'Tacilytics · Open Source ·',
+    '· open source ·': '· Open Source ·',
     'Direct / none': 'Direkt / keine', 'Android app': 'Android-App', 'iOS app': 'iOS-App', 'Web': 'Web',
     'For scripts, agents and the CLI (': 'Für Skripte, Agents und die CLI (',
     '). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.': '). Ein Key handelt als du, sieht nur deine Seiten und kann weder das Team noch deine Sicherheitseinstellungen ändern. Nur lesen, außer du nimmst den Haken raus.',
