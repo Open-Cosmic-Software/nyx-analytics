@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#071114">
 <link rel="preload" href="/assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <script src="/theme.js?v=1"></script>
-<link rel="stylesheet" href="/style.css?v=2.5.0">
+<link rel="stylesheet" href="/style.css?v=2.5.0.2">
 </head>
 <body>
 
@@ -202,6 +202,7 @@
 <!-- Add site modal -->
 <div id="addModal" class="modal-overlay hide">
   <div class="modal">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-site"></use></svg></span>
     <h2>Add a site</h2>
     <p>Enter the domain you want to track.</p>
@@ -215,6 +216,7 @@
 <!-- Snippet modal: website + apps (13.10.2026) -->
 <div id="snippetModal" class="modal-overlay hide">
   <div class="modal modal-wide">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-code"></use></svg></span>
     <h2>Add tracking</h2>
     <p style="margin-bottom:12px">for <strong id="snipDomain"></strong>. Same dashboard for website and apps.</p>
@@ -237,6 +239,7 @@
 <!-- Share modal -->
 <div id="shareModal" class="modal-overlay hide">
   <div class="modal">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-share"></use></svg></span>
     <h2>Share dashboard</h2>
     <p>Anyone with this link can view stats for <strong id="shareDomain"></strong> — read-only, no login.</p>
@@ -250,6 +253,7 @@
 <!-- Funnel builder modal -->
 <div id="funnelModal" class="modal-overlay hide">
   <div class="modal">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-funnel"></use></svg></span>
     <h2>New funnel</h2>
     <p>2–8 ordered steps. A visitor advances only after completing the previous step.</p>
@@ -265,6 +269,7 @@
 <!-- Live visitors modal -->
 <div id="liveModal" class="modal-overlay hide">
   <div class="modal live">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <div class="live-head">
       <h2>Live</h2>
       <span class="realtime"><span class="dot"></span><span id="live-online">0</span> online</span>
@@ -280,6 +285,7 @@
 <!-- Import -->
 <div id="importModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <h2>Import history into <span id="impSite"></span></h2>
     <p>Bring your old numbers along. They show up in the chart and in the panels for the days <strong>before</strong> Tacilytics started counting — never twice.</p>
     <div id="impErr" class="err" role="alert"></div>
@@ -300,6 +306,7 @@
 <!-- Alerts -->
 <div id="alertsModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <h2>Alerts for <span id="alertsSite"></span></h2>
     <p>Tacilytics sends a message to a webhook (Discord, Slack, or anything that takes JSON). Checked every 10 minutes.</p>
     <div id="alertsErr" class="err" role="alert"></div>
@@ -332,6 +339,7 @@
 <!-- Chart annotations -->
 <div id="annModal" class="modal-overlay hide">
   <div class="modal modal-wide settings">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     <h2>Notes in the chart</h2>
     <p>Mark a day — a newsletter, a release, a sale — so a spike explains itself later. Everyone with access to this site sees them.</p>
     <div id="annErr" class="err" role="alert"></div>
@@ -351,6 +359,7 @@
         <button data-t="team"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-users"></use></svg>Team</button>
         <button data-t="activity"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-timer"></use></svg>Activity</button>
       </div>
+      <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
     </div>
     <div id="setErr" class="err" role="alert"></div>
     <div id="setSecurity"></div>
@@ -362,7 +371,7 @@
 
 <div class="tip" id="tip"></div>
 <script src="/i18n.js?v=2"></script>
-<script src="/account.js?v=2.5.0"></script>
-<script src="/app.js?v=2.6.0"></script>
+<script src="/account.js?v=2.5.1"></script>
+<script src="/app.js?v=2.6.1"></script>
 </body>
 </html>

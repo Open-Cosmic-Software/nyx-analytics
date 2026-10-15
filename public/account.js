@@ -178,7 +178,7 @@
     if (t === 'security') renderSecurity(); else if (t === 'team') renderTeam(); else renderActivity();
   }
   $('settingsBtn').onclick = function () { openSettings(); };
-  $('closeSettings').onclick = function () { $('settingsModal').classList.add('hide'); };
+  $('closeSettings').onclick = function () { closeModal($('settingsModal')); };
   $('setTabs').onclick = function (e) { var b = e.target.closest('button'); if (b) showTab(b.dataset.t); };
   function date(ms) { return ms ? new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
 
@@ -233,7 +233,7 @@
       '</div>' +
       '<div class="set-card"><h3>' + ico('i-smartphone') + 'Two-factor code (OTP) <span class="pill">' + (me.totp ? 'on' : 'optional') + '</span></h3>' +
       (me.totp
-        ? '<p class="muted">Signing in with your password also asks for a 6-digit code from your authenticator app. Recovery codes left: <strong>' + me.recoveryLeft + '</strong>.</p>' +
+        ? '<p class="muted">Signing in with your password also asks for a 6-digit code from your authenticator app.</p><p class="muted small"><span>Recovery codes left:</span> <strong>' + me.recoveryLeft + '</strong></p>' +
           '<div class="set-inline"><input id="totpPw" type="password" placeholder="Your password" autocomplete="current-password"><button class="btn ghost" id="newRecovery">New recovery codes</button><button class="btn ghost danger" id="totpOff">Turn off</button></div>'
         : '<p class="muted">Use any authenticator app (1Password, Google Authenticator, Authy, Bitwarden …).</p><div id="totpSetup"><button class="btn" id="totpStart">Set up</button></div>') +
       '</div>' +
@@ -491,4 +491,34 @@
   }
 
   window.TaciAccount = { prepareLogin: prepareLogin, showInvite: showInvite, showReset: showReset, afterBoot: afterBoot };
+
+  // ── closing modals: ONE function for every exit (X, Close button, Esc, click on the backdrop) ──
+  // login / reset / invite are not closable — there is nothing behind them without signing in.
+  var LOCKED = { login: 1, reset: 1, invite: 1 };
+  function closeModal(ov) {
+    if (!ov || LOCKED[ov.id] || ov.classList.contains('hide')) return;
+    ov.classList.add('hide');
+    ov.dispatchEvent(new CustomEvent('taci:close')); // e.g. the live view stops polling
+  }
+  function topModal() {
+    var open = [].filter.call(document.querySelectorAll('.modal-overlay'), function (o) { return !o.classList.contains('hide'); });
+    return open[open.length - 1] || null; // later in the DOM = drawn on top
+  }
+  document.addEventListener('click', function (e) {
+    var x = e.target.closest && e.target.closest('[data-close]');
+    if (x) closeModal(x.closest('.modal-overlay'));
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    var top = topModal();
+    if (top && !LOCKED[top.id]) { e.preventDefault(); closeModal(top); }
+  });
+  // backdrop: press AND release on the overlay itself — selecting text inside and letting go outside must not close
+  var downOn = null;
+  document.addEventListener('mousedown', function (e) { downOn = e.target; });
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.classList && t.classList.contains('modal-overlay') && downOn === t) closeModal(t);
+  });
+  window.TaciModal = { close: closeModal };
 })();

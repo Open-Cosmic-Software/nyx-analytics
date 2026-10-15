@@ -14,6 +14,7 @@
     }
   } catch (e) { /* corrupt value → keep both visible */ }
   var lastStats = null;
+  function closeModal(ov) { window.TaciModal.close(ov); } // one close path for all modals (account.js)
   // dashboard segmentation filters (whitelist mirrors the server's FILTER_COLS + goal)
   var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', platform: 'Platform', version: 'App version', goal: 'Goal' };
 
@@ -124,7 +125,7 @@
   $('siteSelect').onchange = function () { state.site = this.value; localStorage.setItem('nyx_site', state.site); load(); if (typeof loadFunnels === 'function') loadFunnels(); };
 
   $('addSiteBtn').onclick = function () { $('addModal').classList.remove('hide'); $('newDomain').value = ''; $('addErr').textContent = ''; $('newDomain').focus(); };
-  $('cancelAdd').onclick = function () { $('addModal').classList.add('hide'); };
+  $('cancelAdd').onclick = function () { closeModal($('addModal')); };
   $('createSiteBtn').onclick = function () {
     var d = $('newDomain').value.trim();
     api('/api/sites', { method: 'POST', body: JSON.stringify({ domain: d }) }).then(function (s) {
@@ -205,14 +206,15 @@
   };
 
   $('snippetBtn').onclick = function () { if (state.site) showSnippet(state.site); };
-  $('closeSnippet').onclick = function () { $('snippetModal').classList.add('hide'); };
+  $('closeSnippet').onclick = function () { closeModal($('snippetModal')); };
   $('copySnippet').onclick = function () { copyFrom('copySnippet', 'snippetCode'); };
   $('copySnippet2').onclick = function () { copyFrom('copySnippet2', 'snippetCode2', 'Copy step 2'); };
 
   // ── live visitors (last 30 min) ──
   var liveTimer = null;
   function openLive() { if (!state.site || state.site === 'no sites yet') return; $('liveModal').classList.remove('hide'); fetchLive(); clearInterval(liveTimer); liveTimer = setInterval(fetchLive, 8000); }
-  function closeLive() { $('liveModal').classList.add('hide'); clearInterval(liveTimer); liveTimer = null; }
+  function closeLive() { closeModal($('liveModal')); }
+  $('liveModal').addEventListener('taci:close', function () { clearInterval(liveTimer); liveTimer = null; }); // every exit stops polling
   function fetchLive() {
     if (document.hidden) return;
     api('/api/realtime?site=' + encodeURIComponent(state.site)).then(function (r) {
@@ -461,7 +463,7 @@
     });
   }
   $('importBtn').onclick = openImport;
-  $('closeImport').onclick = function () { $('importModal').classList.add('hide'); };
+  $('closeImport').onclick = function () { closeModal($('importModal')); };
   $('impTabs').onclick = function (e) { var b = e.target.closest('button'); if (b) setImpSrc(b.dataset.src); };
   $('impGo').onclick = function () {
     var files = Array.prototype.slice.call($('impFile').files || []);
@@ -512,7 +514,7 @@
     });
   }
   $('alertsBtn').onclick = openAlerts;
-  $('closeAlerts').onclick = function () { $('alertsModal').classList.add('hide'); };
+  $('closeAlerts').onclick = function () { closeModal($('alertsModal')); };
   $('alKind').onchange = function () { $('alGoalRow').classList.toggle('hide', this.value !== 'goal'); };
   $('alAdd').onclick = function () {
     $('alertsErr').textContent = '';
@@ -539,7 +541,7 @@
     });
   }
   $('annBtn').onclick = openAnnotations;
-  $('closeAnn').onclick = function () { $('annModal').classList.add('hide'); };
+  $('closeAnn').onclick = function () { closeModal($('annModal')); };
   $('saveAnn').onclick = function () {
     api('/api/annotations', { method: 'POST', body: JSON.stringify({ site: state.site, day: $('annDay').value, text: $('annText').value }) }).then(function (r) {
       if (r.error) { $('annErr').textContent = r.error; return; }
@@ -841,7 +843,7 @@
   };
   $('copyShare').onclick = function () { navigator.clipboard.writeText($('shareUrl').textContent); $('copyShare').textContent = 'Copied'; setTimeout(function () { $('copyShare').textContent = 'Copy link'; }, 1500); };
   $('revokeShare').onclick = function () { if (shareToken) api('/api/shares/' + shareToken, { method: 'DELETE' }).then(function () { $('shareModal').classList.add('hide'); }); };
-  $('closeShare').onclick = function () { $('shareModal').classList.add('hide'); };
+  $('closeShare').onclick = function () { closeModal($('shareModal')); };
 
   // ── funnels ──
   function fmtPct(p) { return (p == null ? '—' : p + '%'); }
@@ -889,7 +891,7 @@
     $('funnelModal').classList.remove('hide'); $('funnelName').focus();
   };
   $('addStepBtn').onclick = function () { if ($('funnelSteps').children.length < 8) $('funnelSteps').appendChild(stepRow()); };
-  $('cancelFunnel').onclick = function () { $('funnelModal').classList.add('hide'); };
+  $('cancelFunnel').onclick = function () { closeModal($('funnelModal')); };
   $('createFunnelBtn').onclick = function () {
     var steps = Array.prototype.map.call($('funnelSteps').children, function (row) {
       return { type: row.querySelector('.step-type').value, value: row.querySelector('.step-value').value.trim() };

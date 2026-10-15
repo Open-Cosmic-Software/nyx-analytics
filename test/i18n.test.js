@@ -27,3 +27,35 @@ test('i18n: the attribute writer never writes an unchanged value (that would loo
   assert.match(src, /if \(tv != null && tv !== v\) node\.setAttribute/);
   assert.match(src, /if \(t != null && t !== node\.nodeValue\) node\.nodeValue = t/);
 });
+
+// ── modals (2.2.0, Fabian: "no X anywhere") ──
+test('modals: every closable modal has an X, login/reset/invite have none', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const ids = [...html.matchAll(/<div id="([A-Za-z]+)" class="modal-overlay/g)].map((m) => m[1]);
+  const block = (id) => { const i = html.indexOf(`<div id="${id}" class="modal-overlay`); const j = html.indexOf('class="modal-overlay', html.indexOf('>', i)); return html.slice(i, j < 0 ? undefined : j); };
+  for (const id of ids) {
+    const hasX = /class="modal-x" data-close aria-label="Close"/.test(block(id));
+    assert.strictEqual(hasX, !['login', 'reset', 'invite'].includes(id), id);
+  }
+  assert.ok(ids.length >= 12, 'found ' + ids.length + ' modals');
+});
+test('modals: one close path — no handler hides a modal overlay directly', () => {
+  for (const f of ['app.js', 'account.js']) {
+    const js = fs.readFileSync(path.join(__dirname, '..', 'public', f), 'utf8');
+    // closing = closeModal(); only "after success" spots may still hide (site created, funnel created,
+    // share revoked) — they are not user exits
+    const direct = [...js.matchAll(/\$\('(\w+Modal)'\)\.classList\.add\('hide'\)/g)].map((m) => m[1]);
+    assert.deepStrictEqual(direct.filter((id) => !['addModal', 'funnelModal', 'shareModal'].includes(id)), [], f);
+    assert.ok(!/(close|cancel)\w*'\)\.onclick = function \(\) \{ \$\('\w+'\)\.classList\.add\('hide'\)/.test(js), f + ': a close button bypasses closeModal');
+  }
+  const acc = fs.readFileSync(path.join(__dirname, '..', 'public', 'account.js'), 'utf8');
+  assert.match(acc, /var LOCKED = \{ login: 1, reset: 1, invite: 1 \}/);
+  assert.match(acc, /e\.key !== 'Escape'/);
+});
+test('i18n: the OTP hint is a whole sentence in the dictionary (no inline <strong> splitting it)', () => {
+  const acc = fs.readFileSync(path.join(__dirname, '..', 'public', 'account.js'), 'utf8');
+  const s = 'Signing in with your password also asks for a 6-digit code from your authenticator app.';
+  assert.ok(acc.includes('>' + s + '</p>'), 'sentence must be its own text node');
+  assert.ok(Object.prototype.hasOwnProperty.call(DE, s));
+  assert.ok(Object.prototype.hasOwnProperty.call(DE, 'Recovery codes left:'));
+});

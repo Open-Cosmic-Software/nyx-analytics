@@ -526,3 +526,12 @@ html[data-theme="light"] .range input[type=date], html[data-theme="light"] #annD
 html[data-theme="light"] .set-tabs button.active, html[data-theme="light"] .panel h3 .tabs button.active { background: #fff; }
 html[data-theme="light"] .pill { color: #36504c; border-color: rgba(10,40,38,.22); }
 html[data-theme="light"] .stat .label { color: #3f5a56; }
+
+/* one close button for every closable modal (2.2.0) — sticky, so it stays reachable in long modals */
+.modal-x { position: sticky; top: 0; float: right; margin: -14px -12px 0 8px; z-index: 3; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-2, rgba(255,255,255,.06)); border: 1px solid var(--line); border-radius: 10px; color: var(--text-dim); cursor: pointer; }
+.modal-x:hover, .modal-x:focus-visible { color: var(--text); border-color: var(--line-strong); }
+.settings-head .modal-x { position: static; float: none; margin: 0 0 0 6px; flex: none; }
+.modal.settings .settings-head { position: sticky; top: -32px; z-index: 3; margin: -32px -30px 12px; padding: 22px 30px 12px;
+  background: rgb(23,26,34); border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0; }
+html[data-theme="light"] .modal.settings .settings-head { background: #fff; }

@@ -40,7 +40,7 @@
     'Live': 'Live', 'Recent activity': 'Letzte Aktivität', 'Visitors over the last 30 minutes · updates every few seconds': 'Besucher der letzten 30 Minuten · aktualisiert sich alle paar Sekunden',
     'No visitors in the last 30 minutes': 'Keine Besucher in den letzten 30 Minuten',
     // common buttons
-    'Close': 'Schließen', 'Cancel': 'Abbrechen', 'Create': 'Erstellen', 'Add': 'Hinzufügen', 'Save': 'Speichern', 'Remove': 'Entfernen',
+    'Close': 'Schließen', 'Signing in with your password also asks for a 6-digit code from your authenticator app.': 'Bei der Anmeldung mit Passwort wird zusätzlich ein 6-stelliger Code aus deiner Authenticator-App abgefragt.', 'Cancel': 'Abbrechen', 'Create': 'Erstellen', 'Add': 'Hinzufügen', 'Save': 'Speichern', 'Remove': 'Entfernen',
     'Revoke': 'Widerrufen', 'Copy': 'Kopieren', 'Copy link': 'Link kopieren', 'Copied ✓': 'Kopiert ✓', 'Copied': 'Kopiert', 'Saved ✓': 'Gespeichert ✓',
     'Sending…': 'Wird gesendet …', 'Sent ✓': 'Gesendet ✓', 'Failed': 'Fehlgeschlagen', 'Test': 'Test', 'Loading…': 'Lädt …', 'Older': 'Ältere',
     'Uploading…': 'Wird hochgeladen …', 'Download': 'Herunterladen', 'Downloaded': 'Heruntergeladen', 'Changed ✓': 'Geändert ✓', 'on': 'an',
@@ -164,7 +164,6 @@
     [/^(\d+) visitors$/, '$1 Besucher'], [/^(\d+) views$/, '$1 Aufrufe'], [/^added (.+)$/, 'hinzugefügt $1'],
     [/^used (.+)$/, 'benutzt $1'], [/^last sign-in (.+)$/, 'letzte Anmeldung $1'], [/^expires (.+)$/, 'läuft ab $1'], [/^Last sent (.+)$/, 'Zuletzt gesendet $1'],
     [/^Send this to (.+)\. It works once, for 24 hours\. Their 2FA stays on\.$/, 'Schick das an $1. Funktioniert einmal, 24 Stunden lang. Die 2FA bleibt an.'],
-    [/^Signing in with your password also asks for a 6-digit code from your authenticator app\. Recovery codes left: $/, 'Bei der Anmeldung mit Passwort wird zusätzlich ein 6-stelliger Code aus deiner Authenticator-App abgefragt. Übrige Wiederherstellungscodes: '],
   ];
 
   function lang() {
