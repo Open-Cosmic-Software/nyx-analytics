@@ -183,17 +183,33 @@
   function date(ms) { return ms ? new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
 
   // security tab
+  // language + theme: per browser, for everyone (also before an account exists)
+  function prefsCard() {
+    var lang = window.TaciLang ? window.TaciLang.get() : 'auto';
+    var theme = window.TaciTheme ? window.TaciTheme.get() : 'system';
+    var opt = function (v, label, cur) { return '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + label + '</option>'; };
+    return '<div class="set-card"><h3>' + ico('i-settings') + 'Appearance</h3>' +
+      '<div class="set-inline">' +
+      '<label class="small muted" style="flex:0 0 auto">Language</label><select id="prefLang" style="flex:1 1 140px">' + opt('auto', 'Automatic', lang) + opt('en', 'English', lang) + opt('de', 'Deutsch', lang) + '</select>' +
+      '<label class="small muted" style="flex:0 0 auto">Theme</label><select id="prefTheme" style="flex:1 1 140px">' + opt('system', 'System', theme) + opt('light', 'Light', theme) + opt('dark', 'Dark', theme) + '</select>' +
+      '</div><p class="muted small" style="margin:8px 0 0">Language and appearance are saved in this browser.</p></div>';
+  }
+  function bindPrefs() {
+    if ($('prefLang')) $('prefLang').onchange = function () { window.TaciLang.set(this.value); };
+    if ($('prefTheme')) $('prefTheme').onchange = function () { window.TaciTheme.set(this.value); };
+  }
   function renderSecurity() {
     var el = $('setSecurity');
     if (me.kind !== 'user') {
       // legacy passphrase (or API key): offer the first account
-      el.innerHTML =
+      el.innerHTML = prefsCard() +
         '<div class="set-card"><h3>' + ico('i-user-plus') + 'Create your account</h3>' +
         '<p class="muted">You are signed in with the shared passphrase. Create an owner account to unlock two-factor sign-in, passkeys and the team. ' +
         '<strong>After that the passphrase (WEB_PASSWORD) stops working</strong>, so 2FA cannot be bypassed.</p>' +
         '<input id="bsUser" type="text" placeholder="Username" autocomplete="username" autocapitalize="off" spellcheck="false">' +
         '<input id="bsPw" type="password" placeholder="Password (at least 10 characters)" autocomplete="new-password">' +
         '<button class="btn" id="bsBtn">Create owner account</button></div>';
+      bindPrefs();
       $('bsBtn').onclick = function () {
         setErr('');
         post('/api/team/bootstrap', { username: $('bsUser').value.trim(), password: $('bsPw').value }, localStorage.getItem('nyx_token')).then(function (r) {
@@ -208,7 +224,7 @@
       return '<div class="set-row"><span>' + ico('i-key') + esc(k.name) + '</span><span class="muted small">added ' + date(k.created) + (k.last_used ? ' · used ' + date(k.last_used) : '') + '</span>' +
         '<button class="btn ghost danger mini" data-delpk="' + esc(k.id) + '">Remove</button></div>';
     }).join('');
-    el.innerHTML =
+    el.innerHTML = prefsCard() +
       '<div class="set-card"><h3>' + ico('i-key') + 'Passkeys <span class="pill">optional</span></h3>' +
       '<p class="muted">Sign in with Face ID, Touch ID, Windows Hello or a security key. No password, no code — and it cannot be phished.</p>' +
       (pk || '<p class="muted small">No passkey yet.</p>') +
@@ -245,6 +261,7 @@
       '<p class="muted small">Changing it signs you out on all other devices.</p></div>' +
       '<p class="muted small">Signed in as <strong>' + esc(me.username) + '</strong> · ' + ROLE_LABEL[me.role] + '</p>';
 
+    bindPrefs();
     el.querySelectorAll('[data-delpk]').forEach(function (b) {
       b.onclick = function () { if (confirm('Remove this passkey?')) call('DELETE', '/api/me/passkeys/' + encodeURIComponent(b.dataset.delpk)).then(function () { openSettings('security'); }).catch(function (e) { setErr(e.message); }); };
     });

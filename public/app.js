@@ -34,7 +34,16 @@
   // chart palette comes from CSS custom properties (single source of truth for the theme)
   var CSSV = getComputedStyle(document.documentElement);
   function cv(name, fb) { return (CSSV.getPropertyValue(name) || '').trim() || fb; }
-  var COL = { v: cv('--chart-visitors', '#5b8def'), p: cv('--chart-pageviews', '#8b93a3'), red: cv('--red', '#f87171'), dim: cv('--text-dim', '#8b93a3'), line: cv('--line-strong', '#323946') };
+  var COL = {};
+  // chart colours follow the theme: re-read the CSS variables whenever it changes
+  function readColors() {
+    CSSV = getComputedStyle(document.documentElement);
+    COL.v = cv('--chart-visitors', '#5b8def'); COL.p = cv('--chart-pageviews', '#8b93a3'); COL.red = cv('--red', '#f87171');
+    COL.dim = cv('--text-dim', '#8b93a3'); COL.line = cv('--line-strong', '#323946'); COL.bg = cv('--bg', '#071114');
+    COL.grid = document.documentElement.getAttribute('data-theme') === 'light' ? 'rgba(10,40,38,.08)' : 'rgba(255,255,255,.05)';
+  }
+  readColors();
+  new MutationObserver(function () { readColors(); if (lastStats && lastStats.series) drawChart(lastStats.series); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   // Escape any value that originates from visitor beacons before it touches innerHTML.
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
@@ -398,11 +407,11 @@
       '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">' +
       '<stop offset="0%" stop-color="' + COL.v + '" stop-opacity="0.32"/><stop offset="100%" stop-color="' + COL.v + '" stop-opacity="0"/>' +
       '</linearGradient></defs>' +
-      [0.25, 0.5, 0.75].map(function (f) { var gy = (pad + f * (H - 2 * pad)).toFixed(1); return '<line x1="0" x2="' + W + '" y1="' + gy + '" y2="' + gy + '" stroke="rgba(255,255,255,.05)" stroke-dasharray="2 6" vector-effect="non-scaling-stroke"/>'; }).join('') +
+      [0.25, 0.5, 0.75].map(function (f) { var gy = (pad + f * (H - 2 * pad)).toFixed(1); return '<line x1="0" x2="' + W + '" y1="' + gy + '" y2="' + gy + '" stroke="' + COL.grid + '" stroke-dasharray="2 6" vector-effect="non-scaling-stroke"/>'; }).join('') +
       (showV ? '<path d="' + areaP + '" fill="url(#ag)"/>' : '') +
       (showP ? '<path d="' + path('pageviews') + '" fill="none" stroke="' + COL.p + '" stroke-width="1.6" stroke-dasharray="4 4" opacity="0.85"/>' : '') +
       (showV ? '<path d="' + path('visitors') + '" fill="none" stroke="' + COL.v + '" stroke-width="2.4" stroke-linecap="round"/>' : '') +
-      (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="#071114" stroke-width="1.5"/>'; }).join('') : '') +
+      (showV && n <= 40 ? series.map(function (d, i) { return '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(d.visitors).toFixed(1) + '" r="2.4" fill="' + COL.v + '" stroke="' + COL.bg + '" stroke-width="1.5"/>'; }).join('') : '') +
       annotationMarks(series, x, H) +
       hovers;
     var tip = $('tip');

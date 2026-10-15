@@ -251,6 +251,10 @@ counts unique visitors *per day* and can’t follow the same person across days 
 devices. You get the 95 % that matters (how many, which pages, from where) with 0 %
 cookie banner — the same approach as Plausible/Fathom.
 
+## Light mode & German
+
+Settings → Security → **Appearance**: *Theme* (System / Light / Dark) and *Language* (Automatic / English / Deutsch), saved per browser. *System* follows the device's light/dark setting live; *Automatic* picks German when the browser is German. Your data (paths, sources, event names) is never translated.
+
 ## Team, 2FA & passkeys
 
 Out of the box the dashboard opens with one shared passphrase (`WEB_PASSWORD`). When you want more:
