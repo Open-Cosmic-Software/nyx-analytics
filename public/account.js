@@ -229,6 +229,12 @@
           '<a class="btn ghost mini" target="_blank" rel="noopener" href="' + esc(d + '?tacilytics=on') + '">Count again</a></div>';
       }).join('') +
       '</div>' +
+      '<div class="set-card"><h3>' + ico('i-code') + 'API keys</h3>' +
+      '<p class="muted">For scripts, agents and the CLI (<code>TACILYTICS_API_KEY</code>). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.</p>' +
+      '<div id="keyList"><p class="muted small">Loading…</p></div>' +
+      '<div class="set-inline"><input id="keyName" type="text" placeholder="Name, e.g. reporting script" maxlength="60">' +
+      (me.role !== 'viewer' ? '<label class="small muted" style="display:inline-flex;gap:6px;align-items:center;flex:0 0 auto"><input type="checkbox" id="keyRo" checked style="width:auto;margin:0"> read-only</label>' : '') +
+      '<button class="btn" id="keyAdd">Create key</button></div><div id="keyOut"></div></div>' +
       '<div class="set-card"><h3>' + ico('i-shield') + 'Password</h3>' +
       '<div class="set-inline"><input id="pwOld" type="password" placeholder="Current password" autocomplete="current-password"><input id="pwNew" type="password" placeholder="New password (10+)" autocomplete="new-password"><button class="btn ghost" id="pwSave">Change</button></div>' +
       '<p class="muted small">Changing it signs you out on all other devices.</p></div>' +
@@ -264,6 +270,27 @@
     };
     if ($('newRecovery')) $('newRecovery').onclick = function () {
       call('POST', '/api/me/recovery', { password: $('totpPw').value }).then(function (r) { showRecovery(r.recoveryCodes); }).catch(function (e) { setErr(e.message); });
+    };
+    function loadKeys() {
+      call('GET', '/api/me/keys').then(function (keys) {
+        $('keyList').innerHTML = keys.length ? keys.map(function (k) {
+          return '<div class="set-row"><span>' + ico('i-code') + esc(k.name) + ' <code class="muted small">' + esc(k.prefix) + '…</code>' + (k.read_only ? ' <span class="pill">read-only</span>' : ' <span class="pill">read + write</span>') + '</span>' +
+            '<span class="muted small">' + (k.last_used ? 'used ' + date(k.last_used) : 'never used') + '</span><button class="btn ghost danger mini" data-delkey="' + k.id + '">Revoke</button></div>';
+        }).join('') : '<p class="muted small">No keys yet.</p>';
+        $('keyList').querySelectorAll('[data-delkey]').forEach(function (b) {
+          b.onclick = function () { if (confirm('Revoke this key? Scripts using it stop working immediately.')) call('DELETE', '/api/me/keys/' + b.dataset.delkey).then(loadKeys).catch(function (e) { setErr(e.message); }); };
+        });
+      }).catch(function (e) { setErr(e.message); });
+    }
+    loadKeys();
+    $('keyAdd').onclick = function () {
+      setErr('');
+      call('POST', '/api/me/keys', { name: $('keyName').value.trim(), readOnly: $('keyRo') ? $('keyRo').checked : true }).then(function (k) {
+        $('keyName').value = '';
+        $('keyOut').innerHTML = '<p class="muted small" style="margin:10px 0 4px">Copy it now — it is shown only once.</p><div class="snippet">' + esc(k.key) + '</div><button class="btn ghost mini" id="keyCopy">Copy key</button>';
+        $('keyCopy').onclick = function () { navigator.clipboard.writeText(k.key); this.textContent = 'Copied ✓'; };
+        loadKeys();
+      }).catch(function (e) { setErr(e.message); });
     };
     $('pwSave').onclick = function () {
       setErr('');

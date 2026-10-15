@@ -139,6 +139,16 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       created INTEGER NOT NULL,
       expires INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key_hash TEXT NOT NULL UNIQUE,
+      prefix TEXT NOT NULL,       -- first characters, shown in the list so people can tell keys apart
+      user_id INTEGER NOT NULL,
+      name TEXT,
+      read_only INTEGER NOT NULL DEFAULT 1,
+      created INTEGER NOT NULL,
+      last_used INTEGER
+    );
     CREATE TABLE IF NOT EXISTS password_resets (
       token_hash TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -192,10 +202,21 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   }
   function principal(req) {
     // agents / CLI: API key = owner over everything
-    if (API_KEY) {
-      const hdr = String(req.headers['authorization'] || '');
-      const key = hdr.startsWith('Bearer ') ? hdr.slice(7) : String(req.headers['x-api-key'] || '');
-      if (key && safeEq(key, API_KEY)) return { kind: 'apikey', role: 'owner', sites: null, user: null };
+    const hdr = String(req.headers['authorization'] || '');
+    const key = hdr.startsWith('Bearer ') ? hdr.slice(7) : String(req.headers['x-api-key'] || '');
+    if (key) {
+      // the server-wide API_KEY from .env: owner over everything (agents / CLI on your own box)
+      if (API_KEY && safeEq(key, API_KEY)) return { kind: 'apikey', role: 'owner', sites: null, user: null };
+      // personal keys (tk_…): act as their owner, never more — and read-only unless created otherwise
+      if (key.startsWith('tk_')) {
+        const k = db.prepare('SELECT * FROM api_keys WHERE key_hash = ?').get(sha256(key));
+        const u = k && q.userById.get(k.user_id);
+        if (!u) return null;
+        if (!k.last_used || Date.now() - k.last_used > 60000) db.prepare('UPDATE api_keys SET last_used = ? WHERE id = ?').run(Date.now(), k.id);
+        const role = k.read_only ? 'viewer' : u.role;
+        return { kind: 'userkey', role, sites: u.sites ? JSON.parse(u.sites) : null, user: u, keyId: k.id };
+      }
+      return null; // a wrong key is a failed sign-in, not an anonymous request
     }
     const t = String(req.headers['x-session-token'] || '');
     if (!t) return null;
@@ -430,7 +451,10 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     }
     res.json(out);
   });
-  const userOnly = (req, res, next) => (req.principal.user ? next() : res.status(400).json({ error: 'Create an account first' }));
+  const userOnly = (req, res, next) => {
+    if (req.principal.kind === 'userkey') return res.status(403).json({ error: 'API keys cannot change account settings — sign in' });
+    return req.principal.user ? next() : res.status(400).json({ error: 'Create an account first' });
+  };
   async function needPassword(req, res) {
     if (rateLimited('reauth:' + req.principal.user.id, 10, 15 * 60000)) { res.status(429).json({ error: 'Too many attempts — wait 15 minutes' }); return false; }
     const u = q.userById.get(req.principal.user.id);
@@ -521,8 +545,33 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     res.json({ ok: true });
   });
 
+  // ── personal API keys ──
+  app.get('/api/me/keys', auth, userOnly, (req, res) => {
+    res.json(db.prepare('SELECT id, prefix, name, read_only, created, last_used FROM api_keys WHERE user_id = ? ORDER BY created').all(req.principal.user.id)
+      .map((k) => ({ ...k, read_only: !!k.read_only })));
+  });
+  app.post('/api/me/keys', auth, userOnly, (req, res) => {
+    const b = req.body || {};
+    const n = db.prepare('SELECT COUNT(*) n FROM api_keys WHERE user_id = ?').get(req.principal.user.id).n;
+    if (n >= 20) return res.status(400).json({ error: 'At most 20 keys per account' });
+    // a viewer can only ever get a read-only key
+    const readOnly = req.principal.role === 'viewer' ? true : b.readOnly !== false;
+    const key = 'tk_' + crypto.randomBytes(24).toString('base64url');
+    const name = String(b.name || '').trim().slice(0, 60) || 'API key';
+    const info = db.prepare('INSERT INTO api_keys (key_hash, prefix, user_id, name, read_only, created) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(sha256(key), key.slice(0, 10), req.principal.user.id, name, readOnly ? 1 : 0, Date.now());
+    res.json({ id: info.lastInsertRowid, key, name, read_only: readOnly }); // the key is shown exactly once
+  });
+  app.delete('/api/me/keys/:id', auth, userOnly, (req, res) => {
+    db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.principal.user.id);
+    res.json({ ok: true });
+  });
+
   // ── team (owner) ───────────────────────────────────────────────────────────
-  const ownerOnly = requireRole('owner');
+  // team management needs a real sign-in (or the server API_KEY): a personal key that leaks must not
+  // be able to invite, promote or remove people
+  const ownerOnly = (req, res, next) => requireRole('owner')(req, res, () => (req.principal.kind === 'userkey'
+    ? res.status(403).json({ error: 'API keys cannot manage the team — sign in' }) : next()));
 
   // first account: only from a legacy (WEB_PASSWORD) or API-key session, only while there are none
   app.post('/api/team/bootstrap', ownerOnly, async (req, res) => {
@@ -580,6 +629,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     db.transaction(() => {
       db.prepare('DELETE FROM passkeys WHERE user_id = ?').run(u.id);
       db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(u.id);
+      db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(u.id);
       q.sessDelUser.run(u.id);
       db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
     })();

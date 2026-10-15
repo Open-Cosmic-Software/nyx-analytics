@@ -234,7 +234,9 @@ Everyone can turn on, **optionally**:
 
 **Locked out?** On the server: `tacilytics users` lists accounts, `tacilytics reset-login <username>` prints a new password, turns 2FA off and ends that person's sessions. An owner can also reset a teammate's 2FA in Settings → Team.
 
-The API key (`API_KEY`, Bearer) keeps owner rights for agents and the CLI.
+**API keys per person:** Settings → Security → API keys creates a personal key (`tk_…`) for scripts, agents and the CLI. It acts as you and never more: it sees only your sites, is **read-only unless you untick it** (a viewer's key always is), and cannot manage the team or change security settings. Keys are stored as SHA-256, shown once, and can be revoked; removing a member revokes theirs.
+
+The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI on your own box.
 
 ## Configuration
 

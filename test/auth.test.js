@@ -316,11 +316,59 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
     owner = (await call('POST', '/auth/passkey/verify', { body: { ticket: o.j.ticket, response: key.get(o.j.options, ORIGIN) } })).j.token;
   }
 
+  // personal API keys
+  r = await call('POST', '/api/me/keys', { token: viewer, body: { name: 'x' } });
+  await t.test('old viewer session is gone (reset above)', () => assert.strictEqual(r.status, 401));
+  const veraTok = (await call('POST', '/auth/login', { body: { username: 'vera', password: 'vera-new-password-1' } })).j.token;
+  r = await call('POST', '/api/me/keys', { token: veraTok, body: { name: 'dashboard bot', readOnly: false } });
+  const veraKey = r.j.key;
+  await t.test('viewer key is always read-only', () => { assert.match(veraKey, /^tk_/); assert.strictEqual(r.j.read_only, true); });
+  await t.test('viewer key: own site yes, other site no, cannot write', async () => {
+    assert.strictEqual((await call('GET', '/api/v1/stats?site=a.test', { key: veraKey })).status, 200);
+    assert.strictEqual((await call('GET', '/api/v1/stats?site=b.test', { key: veraKey })).status, 403);
+    assert.strictEqual((await call('POST', '/api/v1/sites', { key: veraKey, body: { domain: 'z.test' } })).status, 403);
+    assert.deepStrictEqual((await call('GET', '/api/v1/sites', { key: veraKey })).j.map((x) => x.domain), ['a.test']);
+  });
+  r = await call('POST', '/api/me/keys', { token: owner, body: { name: 'ci', readOnly: false } });
+  const ownerKey = r.j.key; const ownerKeyId = r.j.id;
+  r = await call('POST', '/api/me/keys', { token: owner, body: { name: 'ro' } });
+  const ownerRoKey = r.j.key;
+  await t.test('keys default to read-only', () => assert.strictEqual(r.j.read_only, true));
+  await t.test('owner read-only key cannot add sites, write key can', async () => {
+    assert.strictEqual((await call('POST', '/api/v1/sites', { key: ownerRoKey, body: { domain: 'ro.test' } })).status, 403);
+    assert.strictEqual((await call('POST', '/api/v1/sites', { key: ownerKey, body: { domain: 'rw.test' } })).status, 200);
+  });
+  await t.test('a personal key cannot manage the team or account security', async () => {
+    assert.strictEqual((await call('GET', '/api/team', { key: ownerKey })).status, 403);
+    assert.strictEqual((await call('POST', '/api/team/invites', { key: ownerKey, body: { role: 'owner' } })).status, 403);
+    assert.strictEqual((await call('POST', '/api/me/keys', { key: ownerKey, body: {} })).status, 403);
+    assert.strictEqual((await call('POST', '/api/me/totp/disable', { key: ownerKey, body: {} })).status, 403);
+    assert.strictEqual((await call('POST', `/api/team/users/${veraId}/reset-link`, { key: ownerKey })).status, 403);
+  });
+  await t.test('wrong tk_ key → 401, not anonymous', async () => assert.strictEqual((await call('GET', '/api/v1/sites', { key: 'tk_nope' })).status, 401));
+  await t.test('a wrong key is not rescued by a valid session token on the same request', async () => {
+    assert.strictEqual((await call('GET', '/api/sites', { token: owner })).status, 200, 'precondition: session valid');
+    assert.strictEqual((await call('GET', '/api/sites', { key: 'tk_nope', token: owner })).status, 401);
+    assert.strictEqual((await call('GET', '/api/sites', { key: 'some-old-or-typo-key', token: owner })).status, 401);
+  });
+  r = await call('GET', '/api/me/keys', { token: owner });
+  await t.test('key list shows prefix but never the key', () => {
+    assert.strictEqual(r.j.length, 2);
+    assert.ok(r.j.every((k) => k.prefix.length === 10 && !('key' in k) && !('key_hash' in k)));
+  });
+  await call('DELETE', '/api/me/keys/' + ownerKeyId, { token: owner });
+  await t.test('revoked key stops working', async () => assert.strictEqual((await call('GET', '/api/v1/sites', { key: ownerKey })).status, 401));
+  await t.test('removing a member kills their keys', async () => {
+    const tm = (await call('GET', '/api/team', { token: owner })).j;
+    await call('DELETE', '/api/team/users/' + tm.users.find((u) => u.username === 'vera').id, { token: owner });
+    assert.strictEqual((await call('GET', '/api/v1/sites', { key: veraKey })).status, 401);
+  });
+
   // storage + restart
   await stop();
   await t.test('no plain session token, invite token or recovery code in the DB', () => {
     const raw = fs.readFileSync(DB_PATH).toString('latin1') + (fs.existsSync(DB_PATH + '-wal') ? fs.readFileSync(DB_PATH + '-wal').toString('latin1') : '');
-    for (const s of [owner, viaPasskey, viewer, viewerInvite, reset, recovery[1], 'owner-password-1', 'vera-new-password-1']) assert.ok(!raw.includes(s), 'found plain secret in DB');
+    for (const s of [owner, viaPasskey, viewer, viewerInvite, reset, recovery[1], 'owner-password-1', 'vera-new-password-1', ownerRoKey, veraKey]) assert.ok(!raw.includes(s), 'found plain secret in DB');
   });
   await start();
   await t.test('sessions survive a restart', async () => assert.strictEqual((await call('GET', '/api/me', { token: owner })).status, 200));
