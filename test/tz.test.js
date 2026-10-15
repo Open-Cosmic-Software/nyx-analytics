@@ -99,3 +99,35 @@ test('alerts: baseline is the same LOCAL hour on earlier days (Tyto c)', () => {
   assert.strictEqual(new Date(tz.sameLocalTime('UTC', t, 7)).toISOString(), '2025-10-22T08:00:00.000Z');
   assert.strictEqual(new Date(tz.sameLocalTime('Asia/Kathmandu', t, 7)).toISOString(), '2025-10-22T08:00:00.000Z');
 });
+
+// Kiro's expected values (Rudel 11:13Z, measured with Node 22) — a day is [midnight(d), midnight(d+1))
+test('day lengths across DST and odd offsets (Kiro)', () => {
+  const H = (z, d) => (tz.dayStart(z, tz.addDays(d, 1)) - tz.dayStart(z, d)) / 36e5;
+  assert.strictEqual(H('Europe/Berlin', '2026-10-25'), 25);
+  assert.strictEqual(H('Europe/Berlin', '2026-10-24'), 24);
+  assert.strictEqual(H('Europe/Berlin', '2027-03-28'), 23);
+  assert.strictEqual(H('Australia/Lord_Howe', '2026-10-04'), 23.5);
+  assert.strictEqual(H('America/St_Johns', '2026-11-01'), 25);
+  assert.strictEqual(new Date(tz.dayStart('Asia/Kathmandu', '2026-10-25')).toISOString(), '2026-10-24T18:15:00.000Z');
+  assert.strictEqual(tz.localDay('Europe/Berlin', U('2026-10-15T23:30:00Z')), '2026-10-16');
+  assert.strictEqual(tz.validTz('Mars/Olympus'), null);
+});
+
+// Kiro's open edge: the clock jumps over midnight (Santiago 6 Sep 2026: 00:00 → 01:00), so there is no
+// local 00:00. The day starts at its first instant (01:00 local), not at 23:00 of the day before.
+test('a day whose midnight does not exist starts at its first local instant', () => {
+  const s = tz.dayStart('America/Santiago', '2026-09-06');
+  assert.strictEqual(new Date(s).toISOString(), '2026-09-06T04:00:00.000Z');
+  assert.strictEqual(tz.localDay('America/Santiago', s), '2026-09-06');
+  assert.strictEqual(tz.localDay('America/Santiago', s - 60000), '2026-09-05');
+  assert.strictEqual((tz.dayStart('America/Santiago', '2026-09-07') - s) / 36e5, 23);
+  assert.strictEqual((s - tz.dayStart('America/Santiago', '2026-09-05')) / 36e5, 24);
+  // every day boundary of a year in such zones is consistent: start belongs to the day, start-1min does not
+  for (const z of ['America/Santiago', 'Asia/Beirut', 'America/Havana', 'Europe/Berlin']) {
+    for (let d = '2026-01-01'; d <= '2027-12-31'; d = tz.addDays(d, 1)) {
+      const t = tz.dayStart(z, d);
+      assert.strictEqual(tz.localDay(z, t), d, z + ' ' + d);
+      assert.strictEqual(tz.localDay(z, t - 60000), tz.addDays(d, -1), z + ' ' + d + ' -1min');
+    }
+  }
+});

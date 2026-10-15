@@ -42,6 +42,13 @@ function dayStart(tz, day) {
   if (!tz || tz === 'UTC') return wall;
   let t = wall - offsetMin(tz, wall) * 60000;
   t = wall - offsetMin(tz, t) * 60000;
+  // Clock jumps over midnight (America/Santiago, Asia/Beirut …): 00:00 does not exist, and t lands on
+  // 23:00 of the day before. The day then starts at the first instant that already belongs to it (Kiro).
+  if (localDay(tz, t) < day) {
+    let lo = t, hi = t + 3 * 3600000;
+    while (hi - lo > 60000) { const mid = lo + Math.floor((hi - lo) / 120000) * 60000; if (localDay(tz, mid) < day) lo = mid; else hi = mid; }
+    t = hi;
+  }
   return t;
 }
 function addDays(day, n) { return new Date(Date.parse(day + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10); }
