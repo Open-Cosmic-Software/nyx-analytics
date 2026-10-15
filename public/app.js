@@ -120,15 +120,46 @@
       if (!sites.length) { sel.innerHTML = '<option>no sites yet</option>'; return; }
       if (!state.site || !sites.some(function (s) { return s.domain === state.site; })) state.site = sites[0].domain;
       sel.value = state.site;
+      showTz();
     });
   }
-  $('siteSelect').onchange = function () { state.site = this.value; localStorage.setItem('nyx_site', state.site); load(); if (typeof loadFunnels === 'function') loadFunnels(); };
+  $('siteSelect').onchange = function () { state.site = this.value; showTz(); localStorage.setItem('nyx_site', state.site); load(); if (typeof loadFunnels === 'function') loadFunnels(); };
 
-  $('addSiteBtn').onclick = function () { $('addModal').classList.remove('hide'); $('newDomain').value = ''; $('addErr').textContent = ''; $('newDomain').focus(); };
+  // ── time zones: the browser's zone is the default for a new site; the list comes from Intl ──
+  var BROWSER_TZ = (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { return 'UTC'; } })();
+  var TZ_LIST = (function () {
+    var l = []; try { l = Intl.supportedValuesOf('timeZone'); } catch (e) { /* old browser: the two below */ }
+    if (l.indexOf('UTC') < 0) l = ['UTC'].concat(l);
+    if (l.indexOf(BROWSER_TZ) < 0) l.push(BROWSER_TZ);
+    return l;
+  })();
+  function fillTz(sel, value) {
+    var list = TZ_LIST.indexOf(value) < 0 ? TZ_LIST.concat([value]) : TZ_LIST;
+    sel.innerHTML = list.map(function (z) { return '<option value="' + esc(z) + '">' + esc(z.replace(/_/g, ' ')) + '</option>'; }).join('');
+    sel.value = value;
+  }
+  function currentSite() { return (state.sites || []).filter(function (s) { return s.domain === state.site; })[0]; }
+  function showTz() { var s = currentSite(); $('tzName').textContent = s ? String(s.timezone || 'UTC').replace(/_/g, ' ') : 'UTC'; $('tzBtn').classList.toggle('hide', !s); }
+  $('tzBtn').onclick = function () {
+    var s = currentSite(); if (!s) return;
+    $('tzSite').textContent = s.domain; $('tzErr').textContent = ''; fillTz($('tzSelect'), s.timezone || 'UTC');
+    $('tzModal').classList.remove('hide'); $('tzSelect').focus();
+  };
+  $('cancelTz').onclick = function () { closeModal($('tzModal'), { force: true }); };
+  $('saveTz').onclick = function () {
+    var s = currentSite(); if (!s) return;
+    api('/api/sites/' + s.id, { method: 'PATCH', body: JSON.stringify({ timezone: $('tzSelect').value }) }).then(function (r) {
+      if (r.error) { $('tzErr').textContent = r.error; return; }
+      closeModal($('tzModal'), { force: true });
+      loadSites().then(load);
+    });
+  };
+
+  $('addSiteBtn').onclick = function () { $('addModal').classList.remove('hide'); $('newDomain').value = ''; fillTz($('newTz'), BROWSER_TZ); $('addErr').textContent = ''; $('newDomain').focus(); };
   $('cancelAdd').onclick = function () { closeModal($('addModal'), { force: true }); };
   $('createSiteBtn').onclick = function () {
     var d = $('newDomain').value.trim();
-    api('/api/sites', { method: 'POST', body: JSON.stringify({ domain: d }) }).then(function (s) {
+    api('/api/sites', { method: 'POST', body: JSON.stringify({ domain: d, timezone: $('newTz').value }) }).then(function (s) {
       if (s.error) { $('addErr').textContent = s.error; return; }
       $('addModal').classList.add('hide');
       state.site = s.domain; localStorage.setItem('nyx_site', state.site);
@@ -926,7 +957,7 @@
       state.site = info.domain;
       var sel = $('siteSelect');
       sel.innerHTML = '<option>' + esc(info.domain) + '</option>'; sel.disabled = true;
-      ['addSiteBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn', 'alertsBtn', 'importBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
+      ['addSiteBtn', 'tzBtn', 'logoutBtn', 'settingsBtn', 'shareBtn', 'snippetBtn', 'addFunnelBtn', 'annBtn', 'alertsBtn', 'importBtn'].forEach(function (id) { var el = $(id); if (el) el.classList.add('hide'); });
       syncLegend();
       load();
       clearInterval(window.__rt);

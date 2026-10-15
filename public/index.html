@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#071114">
 <link rel="preload" href="/assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <script src="/theme.js?v=1"></script>
-<link rel="stylesheet" href="/style.css?v=2.5.0.4">
+<link rel="stylesheet" href="/style.css?v=2.5.0.5">
 </head>
 <body>
 
@@ -76,6 +76,7 @@
     <div class="header-right">
       <div class="realtime" id="realtimeBtn" title="View live visitors" style="cursor:pointer"><span class="dot"></span><span id="realtime">0</span> online now</div>
       <select id="siteSelect"></select>
+      <button class="btn ghost tz-btn" id="tzBtn" title="Time zone of this site — days start at midnight here"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-timer"></use></svg><span id="tzName">UTC</span></button>
       <button class="btn ghost" id="addSiteBtn"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-plus"></use></svg>Add site</button>
       <button class="btn ghost" id="settingsBtn" title="Account, security and team"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-settings"></use></svg><span id="meName">Settings</span></button>
       <button class="btn ghost danger" id="logoutBtn">Sign out</button>
@@ -208,8 +209,26 @@
     <p>Enter the domain you want to track.</p>
     <div id="addErr" class="err"></div>
     <input id="newDomain" type="text" placeholder="example.com" autocomplete="off">
+    <label class="field-label" for="newTz">Time zone (days start at midnight here)</label>
+    <select id="newTz" class="tz-select"></select>
     <button class="btn" id="createSiteBtn">Create</button>
     <button class="btn ghost" id="cancelAdd" style="margin-top:10px">Cancel</button>
+  </div>
+</div>
+
+<!-- Time zone of a site (Fabian) -->
+<div id="tzModal" class="modal-overlay hide" data-guard>
+  <div class="modal">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close"><svg class="ico ui" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-x"></use></svg></button>
+    <span class="logo em"><svg class="ico big" aria-hidden="true"><use href="/assets/icons.svg?v=2#i-timer"></use></svg></span>
+    <h2>Time zone</h2>
+    <p><span>Days, hours, the weekly report and alerts follow this time zone for</span> <b id="tzSite"></b></p>
+    <p>Stored data does not change — switching back and forth is safe.</p>
+    <p class="muted small">Unique visitors per day are an approximation outside UTC: the anonymous visitor ID changes at midnight UTC.</p>
+    <div id="tzErr" class="err"></div>
+    <select id="tzSelect" class="tz-select"></select>
+    <button class="btn" id="saveTz">Save</button>
+    <button class="btn ghost" id="cancelTz" style="margin-top:10px">Cancel</button>
   </div>
 </div>
 
@@ -370,8 +389,8 @@
 </div>
 
 <div class="tip" id="tip"></div>
-<script src="/i18n.js?v=2.2.2"></script>
+<script src="/i18n.js?v=2.2.3"></script>
 <script src="/account.js?v=2.5.5"></script>
-<script src="/app.js?v=2.6.5"></script>
+<script src="/app.js?v=2.7.0"></script>
 </body>
 </html>

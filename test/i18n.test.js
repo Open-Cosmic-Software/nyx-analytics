@@ -19,7 +19,7 @@ test('i18n: every UI text in index.html has a German entry', () => {
   const texts = new Set();
   for (const m of body.matchAll(/>([^<>]+)</g)) { const t = m[1].trim().replace(/&amp;/g, '&'); if (t && /[A-Za-z]{2}/.test(t)) texts.add(t); }
   for (const m of body.matchAll(/(?:placeholder|title)="([^"]+)"/g)) texts.add(m[1].replace(/&amp;/g, '&'));
-  const keep = new Set(['Tacilytics', 'GitHub', 'CSV', 'OS', 'Plausible', 'Google Analytics 4', 'Live', 'Top', 'Medium', 'Funnels', 'Team', 'Import', 'example.com', 'Webhook URL (https://…)', 'Website']);
+  const keep = new Set(['Tacilytics', 'GitHub', 'CSV', 'OS', 'Plausible', 'Google Analytics 4', 'Live', 'Top', 'Medium', 'Funnels', 'Team', 'Import', 'example.com', 'Webhook URL (https://…)', 'Website', 'UTC']);
   const missing = [...texts].filter((t) => !keep.has(t) && !Object.prototype.hasOwnProperty.call(DE, t));
   assert.deepStrictEqual(missing, []);
 });

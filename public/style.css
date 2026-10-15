@@ -527,7 +527,7 @@ html[data-theme="light"] .set-tabs button.active, html[data-theme="light"] .pane
 html[data-theme="light"] .pill { color: #36504c; border-color: rgba(10,40,38,.22); }
 html[data-theme="light"] .stat .label { color: #3f5a56; }
 
-/* one close button for every closable modal (2.2.0) — sticky, so it stays reachable in long modals */
+/* one close button for every closable modal — sticky, so it stays reachable in long modals */
 .modal-x { position: sticky; top: 0; float: right; margin: -14px -12px 0 8px; z-index: 3; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
   background: var(--surface-2, rgba(255,255,255,.06)); border: 1px solid var(--line); border-radius: 10px; color: var(--text-dim); cursor: pointer; }
 .modal-x:hover, .modal-x:focus-visible { color: var(--text); border-color: var(--line-strong); }
@@ -536,7 +536,7 @@ html[data-theme="light"] .stat .label { color: #3f5a56; }
   background: rgb(23,26,34); border-bottom: 1px solid var(--line); border-radius: 20px 20px 0 0; }
 html[data-theme="light"] .modal.settings .settings-head { background: #fff; }
 
-/* scrollbars in Tacilytics style — thin, quiet, follows light/dark (Fabian, 2.2.0) */
+/* scrollbars in Tacilytics style — thin, quiet, follows light/dark (Fabian) */
 :root { --sb-thumb: rgba(180, 255, 240, 0.16); --sb-thumb-hover: rgba(180, 255, 240, 0.32); }
 html[data-theme="light"] { --sb-thumb: rgba(10, 40, 38, 0.18); --sb-thumb-hover: rgba(10, 40, 38, 0.34); }
 * { scrollbar-width: thin; scrollbar-color: var(--sb-thumb) transparent; }
@@ -548,3 +548,8 @@ html[data-theme="light"] { --sb-thumb: rgba(10, 40, 38, 0.18); --sb-thumb-hover:
 .modal::-webkit-scrollbar-track { margin: 14px 0; } /* keeps the thumb off the rounded corners */
 /* login / reset / invite always on top: a 401 while Settings is open must not hide the login behind it */
 #login, #reset, #invite { z-index: 1100; }
+/* ── time zones ── */
+.modal .tz-select { width: 100%; margin-bottom: 14px; }
+.modal .field-label { display: block; color: var(--text-dim); font-size: 0.8rem; margin: -4px 0 6px; text-align: left; }
+.modal p.small { font-size: 0.78rem; margin-top: -14px; }
+.tz-btn span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

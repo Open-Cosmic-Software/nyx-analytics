@@ -168,6 +168,14 @@ Imported numbers are daily totals per dimension (pages, sources, countries, brow
 
 Click **Notes** in the chart legend to mark a day — a newsletter, a release, a sale. A coral line and a diamond appear on that day, the note shows in the tooltip, and everyone with access to the site (including share links) sees it. Admins and owners add and remove notes. `GET /api/annotations?site=…` lists them; `/stats` returns the ones in its range as `annotations`.
 
+## Time zone per site
+
+Every site has its own time zone (any IANA name, e.g. `Europe/Berlin`; the browser's zone is preselected when you add a site, existing sites stay on `UTC`). Click the clock next to the site picker to change it. Days, the hourly view, date ranges, notes, the weekly report, the daily digest and the alert baseline all follow it, with daylight-saving days as 23 or 25 hours and offsets like +5:45 kept exact. Stored data is not touched, so switching back and forth is safe.
+
+One limit: the anonymous visitor ID rotates at midnight **UTC** (that is what keeps it unlinkable across days). Outside UTC a local day therefore spans two IDs, and *unique visitors per day* are an approximation — pageviews, goals and revenue are exact.
+
+`PATCH /api/sites/:id {"timezone":"Europe/Berlin"}` (admin) changes it via the API; unknown names are rejected with 400.
+
 ## Weekly report by e-mail
 
 Settings → Security → **Weekly report**: enter an address and tick *every Monday*. Each person gets one mail per week for **the sites they can see** — visitors and pageviews vs. the week before, top pages, sources, goals and a link to the dashboard. *Send one now* sends a sample.
@@ -297,7 +305,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | `DIGEST_WEBHOOK_URL` | — | Daily digest + default alert target (Discord/Slack-compatible). `off` disables it |
 | `WATCH_MIN_VISITORS` | `10` | Spike/drop alerts stay silent below this many visitors per hour |
 | `SMTP_URL` / `REPORT_FROM` | — | Mail server + sender for the weekly report |
-| `REPORT_HOUR_UTC` | `6` | Monday hour (UTC) the weekly report goes out |
+| `REPORT_HOUR_UTC` | `6` | Monday hour (UTC) the weekly report goes out; it covers the last 7 full days in each site's time zone |
 | `AUDIT_RETENTION_DAYS` | `365` | How long the team activity log is kept (min. 30) |
 | `DATA_RETENTION_DAYS` | `0` | `0` = keep forever; `>0` purges raw events older than N days, daily (data minimisation) |
 
