@@ -34,6 +34,8 @@ const INSIDE_NODE_MODULES = __dirname.split(path.sep).includes('node_modules');
 const DB_PATH = process.env.DB_PATH || path.join(INSIDE_NODE_MODULES ? process.cwd() : __dirname, 'data', 'analytics.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 if (!process.env.WEB_PASSWORD) console.warn('⚠ WEB_PASSWORD is not set — the dashboard uses the default passphrase "tacilytics". Set your own in .env.');
+// Webhook for the daily digest and the default alerts (Discord/Slack-compatible).
+const DIGEST_WEBHOOK_URL = /^(off|none|false|0)$/i.test(process.env.DIGEST_WEBHOOK_URL || '') ? '' : (process.env.DIGEST_WEBHOOK_URL || ''); // 'off' disables it (an empty value would be refilled from .env)
 const RETENTION_DAYS = parseInt(process.env.DATA_RETENTION_DAYS, 10) || 0; // 0 = keep forever; >0 purges older raw events (data minimisation)
 
 // ── DB ──────────────────────────────────────────────────────────────────────
@@ -402,6 +404,7 @@ app.delete('/api/sites/:id', adminOnly, (req, res) => {
   audit(res, 'site.remove', gone ? gone.domain : '#' + id);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM annotations WHERE site_id = ?').run(id);
+  db.prepare('DELETE FROM alerts WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
   res.json({ ok: true });
 });
@@ -875,6 +878,125 @@ app.get('/api/journeys', authOrShare, (req, res) => {
 });
 
 
+// ── alerts: per-site rules (traffic spike / drop / goal reached), delivered to a webhook ──────────
+// Rules live in the DB and are managed from the dashboard (admin+). Delivery: the rule's own webhook,
+// else DIGEST_WEBHOOK_URL. Discord / Slack / generic JSON. Each rule has a cooldown so a long spike
+// sends one message, not twelve.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,          -- 'spike' | 'drop' | 'goal'
+    goal TEXT,                   -- event name for kind = goal
+    threshold INTEGER,           -- goal: events within the window; spike/drop: unused (baseline-based)
+    window_hours INTEGER NOT NULL DEFAULT 24,
+    webhook TEXT,                -- NULL = DIGEST_WEBHOOK_URL
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_fired INTEGER,
+    created INTEGER NOT NULL
+  );
+`);
+const ALERT_KINDS = ['spike', 'drop', 'goal'];
+// SSRF guard: alerts are sent by the server, so a teammate must not be able to point them at
+// internal services. https only, no IP literals in private ranges, no localhost names.
+function webhookProblem(u) {
+  let url; try { url = new URL(String(u)); } catch { return 'Enter a full https:// URL'; }
+  if (url.protocol !== 'https:') return 'Webhook must use https://';
+  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || !h.includes('.') && !h.includes(':')) return 'Webhook must point to a public address';
+  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(h)) return 'Webhook must point to a public address';
+  if (h.includes(':') && (h === '::1' || /^(fc|fd|fe8|fe9|fea|feb|::ffff:)/.test(h) || h === '::')) return 'Webhook must point to a public address';
+  return null;
+}
+// resolve the name too: a public-looking hostname must not resolve to a private address
+const dnsP = require('dns').promises;
+async function webhookResolvesPublic(u) {
+  const h = new URL(u).hostname.replace(/^\[|\]$/g, '');
+  let addrs; try { addrs = (await dnsP.lookup(h, { all: true })).map((a) => a.address); } catch { return false; }
+  return addrs.length > 0 && addrs.every((a) => !webhookProblem('https://' + (a.includes(':') ? '[' + a + ']' : a) + '/'));
+}
+// tests only: a local http receiver (never set this in production)
+const TEST_WEBHOOK_BASE = process.env.TACILYTICS_TEST_HOOKS === '1' ? (process.env.TACILYTICS_TEST_WEBHOOK_BASE || '') : '';
+const isTestWebhook = (u) => !!TEST_WEBHOOK_BASE && String(u).startsWith(TEST_WEBHOOK_BASE);
+// The operator's DIGEST_WEBHOOK_URL (.env) is trusted as before (may be internal, e.g. ntfy on localhost).
+// Webhooks typed into the dashboard are checked, because a teammate must not reach internal services.
+async function deliver(url, text) {
+  const trusted = url && (url === DIGEST_WEBHOOK_URL || isTestWebhook(url));
+  if (!url || (!trusted && (webhookProblem(url) || !(await webhookResolvesPublic(url))))) { console.error('alert: webhook refused'); return false; }
+  const isSlack = /hooks\.slack\.com/.test(url);
+  const body = isSlack ? { text } : { username: 'Tacilytics', content: text, text };
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), redirect: trusted ? 'follow' : 'error', signal: AbortSignal.timeout(10000) });
+    if (!r.ok) console.error('alert webhook failed:', r.status);
+    return r.ok;
+  } catch (e) { console.error('alert webhook error:', e.message); return false; }
+}
+function publicAlert(a, domain) {
+  return { id: a.id, site: domain, kind: a.kind, goal: a.goal, threshold: a.threshold, window_hours: a.window_hours,
+    webhook: a.webhook ? new URL(a.webhook).hostname : null, enabled: !!a.enabled, last_fired: a.last_fired };
+}
+app.get('/api/alerts', auth, (req, res) => {
+  const site = getSiteByDomain.get(norm(req.query.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  res.json({ fallbackWebhook: !!DIGEST_WEBHOOK_URL, alerts: db.prepare('SELECT * FROM alerts WHERE site_id = ? ORDER BY id').all(site.id).map((a) => publicAlert(a, site.domain)) });
+});
+app.post('/api/alerts', adminOnly, async (req, res) => {
+  const b = req.body || {};
+  const site = getSiteByDomain.get(norm(b.site));
+  if (!site) return res.status(404).json({ error: 'Unknown site' });
+  if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
+  if (!ALERT_KINDS.includes(b.kind)) return res.status(400).json({ error: 'kind must be spike, drop or goal' });
+  let goal = null, threshold = null, windowHours = 1;
+  if (b.kind === 'goal') {
+    goal = String(b.goal || '').trim().slice(0, 80);
+    threshold = Math.floor(Number(b.threshold));
+    windowHours = Math.floor(Number(b.window_hours) || 24);
+    if (!goal) return res.status(400).json({ error: 'Name the goal (event name), e.g. Purchase' });
+    if (!(threshold >= 1 && threshold <= 1e6)) return res.status(400).json({ error: 'Threshold must be at least 1' });
+    if (![1, 24, 168].includes(windowHours)) return res.status(400).json({ error: 'Window must be 1, 24 or 168 hours' });
+  }
+  let webhook = null;
+  if (b.webhook && isTestWebhook(b.webhook)) {
+    webhook = String(b.webhook);
+  } else if (b.webhook) {
+    const prob = webhookProblem(b.webhook);
+    if (prob) return res.status(400).json({ error: prob });
+    if (!(await webhookResolvesPublic(b.webhook))) return res.status(400).json({ error: 'Webhook must point to a public address' });
+    webhook = String(b.webhook);
+  } else if (!DIGEST_WEBHOOK_URL) return res.status(400).json({ error: 'Add a webhook URL (no default DIGEST_WEBHOOK_URL is set)' });
+  if (db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n >= 20) return res.status(400).json({ error: 'At most 20 alerts per site' });
+  const info = db.prepare('INSERT INTO alerts (site_id, kind, goal, threshold, window_hours, webhook, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(site.id, b.kind, goal, threshold, windowHours, webhook, Date.now());
+  audit(res, 'alert.add', `${site.domain}: ${b.kind}${goal ? ' ' + goal + ' ≥ ' + threshold + '/' + windowHours + 'h' : ''}`);
+  res.json(publicAlert(db.prepare('SELECT * FROM alerts WHERE id = ?').get(info.lastInsertRowid), site.domain));
+});
+app.patch('/api/alerts/:id', adminOnly, (req, res) => {
+  const a = db.prepare('SELECT * FROM alerts WHERE id = ?').get(Number(req.params.id));
+  if (!a) return res.status(404).json({ error: 'Unknown alert' });
+  if (!siteAllowed(req, a.site_id)) return res.status(403).json(NO_SITE);
+  db.prepare('UPDATE alerts SET enabled = ? WHERE id = ?').run((req.body || {}).enabled ? 1 : 0, a.id);
+  audit(res, (req.body || {}).enabled ? 'alert.on' : 'alert.off', `${a.kind}${a.goal ? ' ' + a.goal : ''}`);
+  res.json({ ok: true });
+});
+app.delete('/api/alerts/:id', adminOnly, (req, res) => {
+  const a = db.prepare('SELECT * FROM alerts WHERE id = ?').get(Number(req.params.id));
+  if (!a) return res.json({ ok: true });
+  if (!siteAllowed(req, a.site_id)) return res.status(403).json(NO_SITE);
+  db.prepare('DELETE FROM alerts WHERE id = ?').run(a.id);
+  audit(res, 'alert.remove', `${a.kind}${a.goal ? ' ' + a.goal : ''}`);
+  res.json({ ok: true });
+});
+app.post('/api/alerts/:id/test', adminOnly, async (req, res) => {
+  const a = db.prepare('SELECT * FROM alerts WHERE id = ?').get(Number(req.params.id));
+  if (!a) return res.status(404).json({ error: 'Unknown alert' });
+  if (!siteAllowed(req, a.site_id)) return res.status(403).json(NO_SITE);
+  if (rateLimited('alert-test:' + a.id, 5, 60 * 60000)) return res.status(429).json({ error: 'Max. 5 test messages per hour' });
+  const site = db.prepare('SELECT domain FROM sites WHERE id = ?').get(a.site_id);
+  const ok = await deliver(a.webhook || DIGEST_WEBHOOK_URL, `🔔 **${site.domain}** test message from Tacilytics — this alert works.`);
+  res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: 'The webhook did not accept the message' });
+});
+
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── data retention (privacy by design: minimise what we keep) ─────────────────
@@ -891,7 +1013,6 @@ if (RETENTION_DAYS > 0) { purgeOld(); setInterval(purgeOld, 24 * 3600 * 1000).un
 
 // ── daily digest: one webhook message per day summarising every site (yesterday vs the day before).
 // Configure DIGEST_WEBHOOK_URL (Discord-compatible) and optionally DIGEST_HOUR_UTC (default 7).
-const DIGEST_WEBHOOK_URL = process.env.DIGEST_WEBHOOK_URL || '';
 const DIGEST_HOUR_UTC = Math.min(23, Math.max(0, parseInt(process.env.DIGEST_HOUR_UTC, 10) || 7));
 let lastDigestDay = null;
 async function sendDigest() {
@@ -922,37 +1043,74 @@ if (DIGEST_WEBHOOK_URL) {
   }, 5 * 60000).unref();
 }
 
-// ── anomaly watchdog: hourly check of the last hour vs. the same hour on previous days.
-// Baseline = median of the same UTC hour over the last 14 days — same-hour compare avoids
-// the classic "every night is an incident" trap of naive averages. Cooldown 6h per site+kind.
+// ── alert engine: every 10 min. Spike/drop compare the last hour with the median of the same UTC
+// hour over 14 days (avoids "every night is an incident"); goals count events in a rolling window.
+// Sites without own rules keep the old behaviour when DIGEST_WEBHOOK_URL is set: spike + drop.
 const WATCH_MIN_VISITORS = Math.max(1, parseInt(process.env.WATCH_MIN_VISITORS, 10) || 10);
-const watchAlerted = new Map(); // "siteId|spike" / "siteId|drop" → last alert ts
+const legacyFired = new Map(); // "siteId|kind" → ts, for the implicit default rules
 function median(a) { const s = [...a].sort((x, y) => x - y); return s.length ? (s[s.length >> 1] + s[(s.length - 1) >> 1]) / 2 : 0; }
-async function watchdogTick() {
-  const now = Date.now();
+function trafficVerdict(siteId, now) {
   const hourStart = now - 3600e3;
-  for (const site of allSites.all()) {
-    const cur = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND name IS NULL').get(site.id, hourStart).v;
-    const hist = [];
-    for (let d = 1; d <= 14; d++) {
-      const s = hourStart - d * 864e5;
-      hist.push(db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(site.id, s, s + 3600e3).v);
-    }
-    const base = median(hist);
-    // abstain when the baseline is too thin to mean anything — a default is not a measurement
-    if (base < WATCH_MIN_VISITORS && cur < WATCH_MIN_VISITORS) continue;
-    let kind = null, emoji = '', text = '';
-    if (base >= 1 && cur >= Math.max(3 * base, base + WATCH_MIN_VISITORS)) { kind = 'spike'; emoji = '🚀'; text = `traffic spike: **${cur}** visitors last hour (usually ~${base})`; }
-    else if (base >= WATCH_MIN_VISITORS && cur <= base * 0.2) { kind = 'drop'; emoji = '📉'; text = `traffic drop: **${cur}** visitors last hour (usually ~${base}) — tracker offline?`; }
-    if (!kind) continue;
-    const key = site.id + '|' + kind;
-    if (now - (watchAlerted.get(key) || 0) < 6 * 3600e3) continue; // cooldown
-    watchAlerted.set(key, now);
-    try {
-      await fetch(DIGEST_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'Tacilytics', content: `${emoji} **${site.domain}** ${text}` }) });
-    } catch (e) { console.error('watchdog webhook error:', e.message); }
+  const cur = db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(siteId, hourStart, now).v;
+  const hist = [];
+  for (let d = 1; d <= 14; d++) {
+    const s0 = hourStart - d * 864e5;
+    hist.push(db.prepare('SELECT COUNT(DISTINCT vh) v FROM events WHERE site_id = ? AND ts >= ? AND ts < ? AND name IS NULL').get(siteId, s0, s0 + 3600e3).v);
   }
+  const base = median(hist);
+  // abstain when the baseline is too thin to mean anything — a default is not a measurement
+  if (base < WATCH_MIN_VISITORS && cur < WATCH_MIN_VISITORS) return { cur, base, kind: null };
+  if (base >= 1 && cur >= Math.max(3 * base, base + WATCH_MIN_VISITORS)) return { cur, base, kind: 'spike' };
+  if (base >= WATCH_MIN_VISITORS && cur <= base * 0.2) return { cur, base, kind: 'drop' };
+  return { cur, base, kind: null };
 }
-if (DIGEST_WEBHOOK_URL) setInterval(watchdogTick, 3600e3).unref();
+const COOLDOWN = { spike: 6 * 3600e3, drop: 6 * 3600e3 };
+async function alertTick(now = Date.now()) {
+  const fired = [];
+  for (const site of allSites.all()) {
+    const rules = db.prepare('SELECT * FROM alerts WHERE site_id = ? AND enabled = 1').all(site.id);
+    const hasOwn = db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n > 0;
+    let verdict = null;
+    const traffic = () => verdict || (verdict = trafficVerdict(site.id, now));
+    const msgFor = (kind, v) => kind === 'spike'
+      ? `🚀 **${site.domain}** traffic spike: **${v.cur}** visitors in the last hour (usually ~${v.base})`
+      : `📉 **${site.domain}** traffic drop: **${v.cur}** visitors in the last hour (usually ~${v.base}) — tracker offline?`;
+    for (const r of rules) {
+      let text = null;
+      if (r.kind === 'goal') {
+        // fire once per window: after firing, wait until the window has passed
+        if (r.last_fired && now - r.last_fired < r.window_hours * 3600e3) continue;
+        const n = db.prepare('SELECT COUNT(*) c FROM events WHERE site_id = ? AND name = ? AND ts >= ? AND ts < ?').get(site.id, r.goal, now - r.window_hours * 3600e3, now).c;
+        if (n >= r.threshold) text = `🎯 **${site.domain}** goal reached: **${n}× ${r.goal}** in the last ${r.window_hours === 1 ? 'hour' : r.window_hours === 24 ? '24 hours' : '7 days'} (threshold ${r.threshold})`;
+      } else {
+        if (r.last_fired && now - r.last_fired < COOLDOWN[r.kind]) continue;
+        const v = traffic();
+        if (v.kind === r.kind) text = msgFor(r.kind, v);
+      }
+      if (!text) continue;
+      db.prepare('UPDATE alerts SET last_fired = ? WHERE id = ?').run(now, r.id); // before sending: a slow webhook must not double-fire
+      fired.push({ site: site.domain, kind: r.kind, text });
+      await deliver(r.webhook || DIGEST_WEBHOOK_URL, text);
+    }
+    if (!hasOwn && DIGEST_WEBHOOK_URL) {
+      const v = traffic();
+      if (v.kind) {
+        const key = site.id + '|' + v.kind;
+        if (now - (legacyFired.get(key) || 0) >= COOLDOWN[v.kind]) {
+          legacyFired.set(key, now);
+          const text = msgFor(v.kind, v);
+          fired.push({ site: site.domain, kind: v.kind, text, implicit: true });
+          await deliver(DIGEST_WEBHOOK_URL, text);
+        }
+      }
+    }
+  }
+  return fired;
+}
+if (process.env.TACILYTICS_ALERT_TICK !== 'off') setInterval(() => { alertTick().catch((e) => console.error('alerts:', e.message)); }, 10 * 60000).unref();
+// test hook: run one evaluation on demand (only with the server API_KEY, only when enabled explicitly)
+if (process.env.TACILYTICS_TEST_HOOKS === '1') {
+  app.post('/api/_test/alert-tick', requireRole('owner'), async (req, res) => res.json(await alertTick(Number((req.body || {}).now) || Date.now())));
+}
 
 app.listen(PORT, '127.0.0.1', () => console.log(`Tacilytics on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
