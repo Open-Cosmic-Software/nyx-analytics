@@ -1215,7 +1215,7 @@ const validEmail = (e) => /^[^\s@<>",;]{1,64}@[^\s@<>",;]{1,190}\.[A-Za-z]{2,}$/
 const { createReport, REPORT_LANGS } = require('./report');
 const reporter = createReport(db);
 function buildReport(user, now) {
-  const sites = allSites.all().filter((st) => !user.sites || JSON.parse(user.sites).includes(st.id));
+  const sites = allSites.all().filter((st) => !st.paused && (!user.sites || JSON.parse(user.sites).includes(st.id)));
   return reporter.build(user, sites, now, { publicUrl: PUBLIC_URL, lang: REPORT_LANGS.includes(user.report_lang) ? user.report_lang : 'en' });
 }
 async function sendReport(user, now = Date.now()) {
@@ -1345,6 +1345,7 @@ const COOLDOWN = { spike: 6 * 3600e3, drop: 6 * 3600e3 };
 async function alertTick(now = Date.now()) {
   const fired = [];
   for (const site of allSites.all()) {
+    if (site.paused) continue; // a paused site collects nothing: a 'drop' alert would only announce the pause (Tyto, 2.3.0)
     const rules = db.prepare('SELECT * FROM alerts WHERE site_id = ? AND enabled = 1').all(site.id);
     const hasOwn = db.prepare('SELECT COUNT(*) n FROM alerts WHERE site_id = ?').get(site.id).n > 0;
     let verdict = null;

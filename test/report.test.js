@@ -208,6 +208,19 @@ test('weekly report', async (t) => {
     await call('POST', '/api/me/report', { token: owner, body: { email: 'fabi@example.com', weekly: true } });
     assert.strictEqual((await call('GET', '/api/me/report', { token: owner })).j.lang, 'de');
   });
+  await t.test('a paused site is left out of the report (Tyto 2.3.0)', async () => {
+    // same Monday as the first run, but built fresh: report_last is reset so the tick sends again
+    { const d = new Database(DB_PATH); d.prepare("UPDATE users SET report_last = NULL, report_lang = 'en' WHERE username = 'fabi'").run(); d.close(); }
+    assert.strictEqual((await call('PATCH', '/api/sites/' + b.id, { key: KEY, body: { paused: true } })).status, 200);
+    mails.length = 0;
+    const r = (await call('POST', '/api/_test/report-tick', { key: KEY, body: { now: monday + 20 * 60000 } })).j;
+    assert.ok(r.some((x) => x.user === 'fabi' && x.sent), JSON.stringify(r));
+    await sleep(300);
+    const m = qp(mails.find((x) => x.rcpt.join().includes('fabi@')).data);
+    assert.match(m, /a\.test/);
+    assert.ok(!/b\.test/.test(m), 'paused b.test is in the report');
+    assert.strictEqual((await call('PATCH', '/api/sites/' + b.id, { key: KEY, body: { paused: false } })).status, 200);
+  });
   await t.test('"send now" works and is rate-limited', async () => {
     mails.length = 0;
     assert.strictEqual((await call('POST', '/api/me/report/send', { token: owner })).status, 200);

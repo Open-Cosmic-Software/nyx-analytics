@@ -120,6 +120,16 @@ test('alerts', async (t) => {
     const f = (await call('POST', '/api/_test/alert-tick', { now: later })).j;
     assert.ok(f.some((x) => x.kind === 'drop'), JSON.stringify(f));
   });
+  await t.test('paused site: the same drop stays quiet (it would only announce the pause, Tyto 2.3.0)', async () => {
+    const later = now + 2 * 864e5; // a fresh day, outside the drop cooldown
+    events(site.id, [{ ts: later - H / 2, vh: 'q1' }]);
+    assert.strictEqual((await call('PATCH', '/api/sites/' + site.id, { paused: true })).status, 200);
+    const f = (await call('POST', '/api/_test/alert-tick', { now: later })).j;
+    assert.deepStrictEqual(f, [], JSON.stringify(f));
+    assert.strictEqual((await call('PATCH', '/api/sites/' + site.id, { paused: false })).status, 200);
+    const g = (await call('POST', '/api/_test/alert-tick', { now: later + 1 })).j;
+    assert.ok(g.some((x) => x.kind === 'drop'), 'resumed: fires again ' + JSON.stringify(g));
+  });
   await t.test('disabled rule does not fire', async () => {
     await call('PATCH', '/api/alerts/' + spike.id, { enabled: false });
     events(site.id, Array.from({ length: 90 }, (_, i) => ({ ts: now + 3 * 864e5 - H / 3, vh: 'x' + i })));
