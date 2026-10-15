@@ -59,3 +59,12 @@ test('i18n: the OTP hint is a whole sentence in the dictionary (no inline <stron
   assert.ok(Object.prototype.hasOwnProperty.call(DE, s));
   assert.ok(Object.prototype.hasOwnProperty.call(DE, 'Recovery codes left:'));
 });
+test('i18n: no DE_RX pattern can be dead because of edge whitespace (tr() matches the TRIMMED core) — Tyto', () => {
+  const s = src.indexOf('var DE_RX = [');
+  const DE_RX = new Function('return ' + src.slice(s + 'var DE_RX = '.length, src.indexOf('\n  ];', s) + 4))();
+  assert.ok(DE_RX.length >= 20, 'parsed ' + DE_RX.length);
+  // a space (or \s) right after ^ or right before $ can never match a trimmed string
+  const dead = DE_RX.map((e) => e[0].source).filter((r) => /^\^(?: |\\s)/.test(r) || /(?: |\\s[*+]?)\$$/.test(r) && !/\\s\*\$$/.test(r));
+  assert.deepStrictEqual(dead, []);
+  assert.match(src, /var core = s\.trim\(\)|core = s\.trim\(\)/, 'test assumes tr() trims first');
+});
