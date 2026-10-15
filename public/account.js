@@ -183,6 +183,7 @@
       $('meName').textContent = m.username || 'Settings';
       showVersion(m.version);
       document.body.classList.toggle('role-viewer', m.role === 'viewer');
+      document.body.classList.toggle('site-limited', !!(m.sites && m.role !== 'owner')); // the operator adds their sites
     }).catch(function () {});
   }
   function openSettings(tab) {

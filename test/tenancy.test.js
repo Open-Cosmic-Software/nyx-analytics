@@ -52,17 +52,20 @@ test('site-limited admins stay inside their sites; paused sites collect nothing'
   // 1) she sees only her site
   const list = await j('GET', '/api/sites', undefined, alice);
   assert.deepStrictEqual(list.data.map((s) => s.domain), ['alpha.test']);
-  // 2) she can add a new site and it becomes hers (and only hers)
-  const c = await j('POST', '/api/sites', { domain: 'charlie.test' }, alice);
+  // 2) she cannot create sites at all (sites are billed and paused by the operator): new, foreign or her own domain
+  for (const d of ['charlie.test', 'bravo.test', 'alpha.test']) {
+    const r = await j('POST', '/api/sites', { domain: d }, alice);
+    assert.strictEqual(r.status, 403, d);
+    assert.ok(!r.data.id, 'no site returned for ' + d);
+  }
+  assert.strictEqual((await j('POST', '/api/v1/sites', { domain: 'charlie.test' }, alice)).status, 403, 'v1 route too');
+  assert.deepStrictEqual((await j('GET', '/api/sites', undefined, alice)).data.map((s) => s.domain), ['alpha.test']);
+  // 3) the operator adds a second site for her; it stays hers only
+  const c = await j('POST', '/api/sites', { domain: 'charlie.test' }, op);
   assert.strictEqual(c.status, 200);
+  const aliceUid = (await j('GET', '/api/team', undefined, owner)).data.users.find((u) => u.username === 'alice').id;
+  assert.strictEqual((await j('PATCH', '/api/team/users/' + aliceUid, { sites: [a.id, c.data.id] }, owner)).status, 200);
   assert.deepStrictEqual((await j('GET', '/api/sites', undefined, alice)).data.map((s) => s.domain).sort(), ['alpha.test', 'charlie.test']);
-  // 3) naming a foreign domain must not hand it over (409, no data, not added to her list)
-  const steal = await j('POST', '/api/sites', { domain: 'bravo.test' }, alice);
-  assert.strictEqual(steal.status, 409);
-  assert.ok(!steal.data.id, 'no foreign site returned');
-  assert.deepStrictEqual((await j('GET', '/api/sites', undefined, alice)).data.map((s) => s.domain).sort(), ['alpha.test', 'charlie.test']);
-  // re-adding her own domain is fine (idempotent)
-  assert.strictEqual((await j('POST', '/api/sites', { domain: 'alpha.test' }, alice)).status, 200);
   // 4) no access to the foreign site anywhere
   assert.strictEqual((await j('GET', '/api/stats?site=bravo.test&period=7d', undefined, alice)).status, 403);
   assert.strictEqual((await j('DELETE', '/api/sites/' + b.id, undefined, alice)).status, 403);
@@ -111,7 +114,9 @@ test('site-limited admins stay inside their sites; paused sites collect nothing'
   const kept = (await j('GET', '/api/sites', undefined, owner)).data.find((s) => s.domain === 'alpha.test');
   assert.ok(kept && kept.paused === 1, 'site still there and still paused');
   assert.strictEqual((await j('GET', '/api/v1/usage?month=' + month, undefined, op)).data.find((u) => u.domain === 'alpha.test').pageviews, 2, 'usage unchanged');
-  assert.strictEqual((await j('POST', '/api/sites', { domain: 'alpha.test' }, alice)).status, 200, 'still hers');
+  // Kiro: paused, she adds a fresh unpaused site and moves data-domain → refused
+  assert.strictEqual((await j('POST', '/api/sites', { domain: 'shop.beispiel.de' }, alice)).status, 403);
+  assert.ok(!(await j('GET', '/api/sites', undefined, owner)).data.some((s) => s.domain === 'shop.beispiel.de'), 'no new site exists');
   await j('PATCH', '/api/sites/' + a.id, { paused: false }, op);
   // the operator still deletes (cloud.js uses the server key)
   const tmp = (await j('POST', '/api/sites', { domain: 'delete-me.test' }, owner)).data;

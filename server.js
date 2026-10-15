@@ -413,6 +413,9 @@ function newToken() { return crypto.randomBytes(24).toString('hex'); }
 // ── sites management ─────────────────────────────────────────────────────────
 const sitesListHandler = (req, res) => res.json(allSites.all().filter((st) => siteAllowed(req, st.id)));
 const sitesCreateHandler = (req, res) => {
+  // a site-limited account (a hosting customer) never creates sites itself: the operator does, because sites are what
+  // is billed and paused. Otherwise a paused customer could add a fresh, unpaused site and move the snippet (Kiro, 2.3.0).
+  if (isLimited(req)) return res.status(403).json({ error: 'Your role does not allow this' });
   const rawDomain = norm(req.body && req.body.domain);
   let domain = rawDomain;
   let displayName = rawDomain; // keep Unicode original for a readable display name (e.g. ernährungs-plan.de)
