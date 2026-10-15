@@ -4,6 +4,11 @@
 
    Optional data-* flags on the <script> tag:
      data-honor-dnt        respect Do-Not-Track / Global Privacy Control (skip all tracking)
+     data-strict           strict mode: read nothing from the visitor's device beyond what the browser sends
+                           with every request anyway (no localStorage, no timezone, no language, no screen/
+                           scroll size, no DNT lookup in JS). Language comes from the Accept-Language header,
+                           DNT/GPC from the request headers (with data-honor-dnt). Costs: no country, no scroll
+                           depth, ?tacilytics=off does not work (exclude own visits another way).
      data-track-outbound   auto-record clicks on links to other domains as events
      data-track-downloads  auto-record file downloads as "File Download" events (optional value: "pdf,zip,…")
      data-track-404        record a "404" event when the page is an error page
@@ -20,15 +25,19 @@
     var domain = s && s.getAttribute('data-domain');
     if (!s || !domain) return;
 
+    var strict = s.hasAttribute('data-strict');
+    var honorDnt = s.hasAttribute('data-honor-dnt');
+
     // Privacy signals (opt-in): if the visitor asked not to be tracked, honour it and do nothing.
-    if (s.hasAttribute('data-honor-dnt')) {
+    // In strict mode the server checks the DNT / Sec-GPC request headers instead (nothing is read here).
+    if (honorDnt && !strict) {
       var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
       if (navigator.globalPrivacyControl === true || dnt === '1' || dnt === 'yes') return;
     }
 
     // "Don't count this browser" (your own visits): open the site once with ?tacilytics=off
     // (?tacilytics=on counts it again). Remembered per browser in localStorage, nothing is sent.
-    try {
+    if (!strict) try {
       var optParam = new URLSearchParams(location.search).get('tacilytics');
       if (optParam === 'off') { localStorage.setItem('tacilytics_ignore', '1'); console.info('Tacilytics: this browser is no longer counted on ' + location.hostname + ' (undo: ?tacilytics=on)'); }
       else if (optParam === 'on') { localStorage.removeItem('tacilytics_ignore'); console.info('Tacilytics: this browser is counted again on ' + location.hostname); }
@@ -39,9 +48,11 @@
     } catch (e) {} // storage blocked → just count normally
 
     var endpoint = new URL(s.src).origin + '/api/collect';
-    var tz = '';
-    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
-    var lang = (navigator.language || '').slice(0, 12);
+    var tz = '', lang = '';
+    if (!strict) {
+      try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+      lang = (navigator.language || '').slice(0, 12);
+    }
     var qs = new URLSearchParams(location.search);
     var first = true;
 
@@ -68,6 +79,7 @@
         um: qs.get('utm_medium') || '',
         uc: qs.get('utm_campaign') || '',
       };
+      if (strict) { payload.st = 1; if (honorDnt) payload.hd = 1; }
       if (name) { payload.n = name; if (props && typeof props === 'object') payload.pr = props; }
       else first = false;
       post(payload);
@@ -77,6 +89,7 @@
     var acc = 0, since = (document.visibilityState === 'visible') ? Date.now() : 0, engPath = location.pathname;
     var maxScroll = 0;
     function measureScroll() {
+      if (strict) return; // window and screen size are device information
       var de = document.documentElement, b = document.body || de;
       var h = Math.max(de.scrollHeight, b.scrollHeight), vh = window.innerHeight || de.clientHeight;
       var y = window.pageYOffset || de.scrollTop || 0;
@@ -91,7 +104,11 @@
     function flushEngagement() {
       var secs = engaged();
       measureScroll();
-      if (secs >= 1 || maxScroll > 0) post({ d: domain, p: engPath, e: 'engagement', dur: secs, sc: maxScroll });
+      if (secs >= 1 || maxScroll > 0) {
+        var eb = { d: domain, p: engPath, e: 'engagement', dur: secs };
+        if (strict) { eb.st = 1; if (honorDnt) eb.hd = 1; } else eb.sc = maxScroll;
+        post(eb);
+      }
     }
     function resetEngagement() { acc = 0; since = Date.now(); engPath = location.pathname; maxScroll = 0; }
     document.addEventListener('visibilitychange', function () {

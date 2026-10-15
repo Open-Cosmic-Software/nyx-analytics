@@ -239,6 +239,11 @@ function parseUA(ua) {
 
 // Rough timezone → ISO country (privacy-preserving alternative to IP geo).
 const TZ_COUNTRY = require('./tz-country.js');
+// first language of an Accept-Language header ("de-DE,de;q=0.9,en;q=0.8" → "de-DE"), or null
+function acceptLang(h) {
+  const m = String(h || '').split(',')[0].split(';')[0].trim().match(/^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})?$/);
+  return m ? m[0].slice(0, 12) : null;
+}
 function countryFromTz(tz) { return (tz && TZ_COUNTRY[tz]) || null; }
 
 const { createDaySalt, dayStr } = require('./day-salt.js');
@@ -330,6 +335,10 @@ function collect(req, res) {
     ua = { browser: 'App', os: APP_PLATFORMS[platform], device: dv === 'tablet' ? 'Tablet' : dv === 'desktop' ? 'Desktop' : (platform === 'android' || platform === 'ios') ? 'Mobile' : 'Desktop' };
   }
   if (!ua) return res.status(204).end(); // bot
+  // strict mode (data-strict): the tracker read nothing on the device. Privacy signals and language come
+  // from headers the browser sends with every request anyway.
+  const strict = String(b.st || '') === '1';
+  if (strict && String(b.hd || '') === '1' && (req.headers['dnt'] === '1' || req.headers['sec-gpc'] === '1')) return res.status(204).end();
 
   const ts = Date.now();
   const day = dayStr(ts);
@@ -352,7 +361,7 @@ function collect(req, res) {
   // engagement beacon: attach a visit duration (+ max scroll depth) to the visitor's latest pageview (no new row).
   if (b.e === 'engagement') {
     const dur = Math.max(0, Math.min(7200, parseInt(b.dur, 10) || 0)); // cap at 2h
-    const sc = b.sc == null || b.sc === '' ? null : Math.max(0, Math.min(100, parseInt(b.sc, 10) || 0));
+    const sc = strict || b.sc == null || b.sc === '' ? null : Math.max(0, Math.min(100, parseInt(b.sc, 10) || 0));
     if (dur > 0 || sc != null) updDur.run({ site_id: site.id, vh, path: pth, dur, scroll: sc, since: ts - 6 * 3600000 });
     return res.status(204).end();
   }
@@ -367,8 +376,8 @@ function collect(req, res) {
   }
   const utmMedium = String(b.um || b.utm_medium || '').slice(0, 60).trim() || null;
   const utmCampaign = String(b.uc || b.utm_campaign || '').slice(0, 80).trim() || null;
-  const tz = String(b.tz || '').slice(0, 60) || null;
-  const lang = String(b.l || b.lang || '').slice(0, 12).split(',')[0] || null;
+  const tz = strict ? null : (String(b.tz || '').slice(0, 60) || null);
+  const lang = strict ? acceptLang(req.headers['accept-language']) : (String(b.l || b.lang || '').slice(0, 12).split(',')[0] || null);
   const name = String(b.n || b.name || '').slice(0, 80).trim() || null; // custom event / goal
   const props = name ? sanitizeProps(b.pr) : null; // properties only attach to named events
   let country = countryFromTz(tz);
