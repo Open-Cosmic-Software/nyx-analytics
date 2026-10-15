@@ -483,10 +483,20 @@ app.get('/api/v1', (_req, res) => res.json({
     'POST /api/v1/sites': 'add a site { domain }',
     'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo, or from=YYYY-MM-DD&to=YYYY-MM-DD)',
     'GET /api/v1/realtime?site=': 'online count, last-30-min pulse + recent events',
+    'GET /api/v1/usage?month=YYYY-MM': 'page views per site in a calendar month (UTC), owner / server key only',
   },
   filters: 'add any of country,source,page,browser,os,device,lang,medium,campaign,goal to /stats to segment',
 }));
 app.get('/api/v1/sites', auth, sitesListHandler);
+// page views per site in one calendar month (UTC), for hosting volume checks. Operator only:
+// owners or the server API key with access to all sites, never a site-limited account.
+app.get('/api/v1/usage', requireRole('owner'), (req, res) => {
+  if (isLimited(req)) return res.status(403).json({ error: 'Your role does not allow this' });
+  const m = String(req.query.month || new Date().toISOString().slice(0, 7));
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return res.status(400).json({ error: 'month must be YYYY-MM' });
+  const from = Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 1, 1), to = Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 1);
+  res.json(db.prepare('SELECT s.id site_id, s.domain, COUNT(e.id) pageviews FROM sites s LEFT JOIN events e ON e.site_id = s.id AND e.ts >= ? AND e.ts < ? AND e.name IS NULL GROUP BY s.id ORDER BY s.id').all(from, to));
+});
 app.post('/api/v1/sites', adminOnly, sitesCreateHandler);
 
 // ── stats ────────────────────────────────────────────────────────────────────

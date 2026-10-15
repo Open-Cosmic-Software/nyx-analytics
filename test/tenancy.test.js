@@ -94,7 +94,18 @@ test('site-limited admins stay inside their sites; paused sites collect nothing'
   await j('PATCH', '/api/sites/' + a.id, { paused: false }, op);
   assert.strictEqual((await hit('alpha.test')).status, 204);
 
-  // 9) the owner can widen or narrow an admin's sites; an unlimited admin sees everything
+  // 9) usage per month: operator only (the server key / an owner), counts page views, not events
+  await fetch(base + '/api/collect', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify({ d: 'alpha.test', p: '/x', n: 'Purchase' }) });
+  const month = new Date().toISOString().slice(0, 7);
+  const use = await j('GET', '/api/v1/usage?month=' + month, undefined, op);
+  assert.strictEqual(use.status, 200);
+  assert.strictEqual(use.data.find((u) => u.domain === 'alpha.test').pageviews, 2, 'two page views, the Purchase event not counted');
+  assert.strictEqual(use.data.find((u) => u.domain === 'bravo.test').pageviews, 0);
+  assert.strictEqual((await j('GET', '/api/v1/usage?month=' + month, undefined, alice)).status, 403, 'customers cannot see other sites\' volume');
+  assert.strictEqual((await j('GET', '/api/v1/usage?month=2026-13', undefined, op)).status, 400);
+  assert.strictEqual((await j('GET', '/api/v1/usage?month=1999-01', undefined, op)).data[0].pageviews, 0);
+
+  // 10) the owner can widen or narrow an admin's sites; an unlimited admin sees everything
   const team = (await j('GET', '/api/team', undefined, owner)).data.users;
   const aliceId = team.find((u) => u.username === 'alice').id;
   assert.deepStrictEqual(team.find((u) => u.username === 'alice').sites.sort(), [a.id, c.data.id].sort());
