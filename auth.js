@@ -180,6 +180,11 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     );
   `);
 
+  // 2.4.1: key scopes. '' = the old behaviour (read-only or the account's own rights); 'hit' = server mode only,
+  // usable for POST /api/v1/hit on the listed sites and nothing else. Existing keys keep scope '' (unchanged).
+  for (const [col, decl] of [['scope', "TEXT NOT NULL DEFAULT ''"], ['sites', 'TEXT']]) {
+    if (!db.prepare('PRAGMA table_info(api_keys)').all().some((c) => c.name === col)) db.exec(`ALTER TABLE api_keys ADD COLUMN ${col} ${decl}`);
+  }
   const q = {
     userCount: db.prepare('SELECT COUNT(*) n FROM users'),
     ownerCount: db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'owner'"),
@@ -204,13 +209,14 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   // after the response is sent. Handlers can name the action/target via res.locals.audit;
   // otherwise method + route are recorded. New endpoints are covered without remembering to.
   // Not logged: tracking beacons, sign-in steps, WebAuthn option requests (no state change).
-  const AUDIT_SKIP = new Set(['/api/collect', '/auth/login', '/auth/login/totp', '/auth/passkey/options', '/auth/passkey/verify', '/auth/logout', '/api/me/passkeys/options', '/api/me/totp/setup']);
+  const AUDIT_SKIP = new Set(['/api/collect', '/auth/login', '/auth/login/totp', '/auth/passkey/options', '/auth/passkey/verify', '/auth/logout', '/api/me/passkeys/options', '/api/me/totp/setup', '/api/v1/hit']);
   const AUDIT_DAYS = Math.max(30, parseInt(process.env.AUDIT_RETENTION_DAYS, 10) || 365);
   const insAudit = db.prepare('INSERT INTO audit_log (ts, actor, action, target, ip) VALUES (?, ?, ?, ?, ?)');
   function actorOf(p) {
     if (!p) return null;
     if (p.kind === 'user') return p.user.username;
     if (p.kind === 'userkey') return p.user.username + ' (API key)';
+    if (p.kind === 'hitkey') return p.user.username + ' (server-mode key)';
     if (p.kind === 'apikey') return 'API key';
     if (p.kind === 'legacy') return 'passphrase';
     return null;
@@ -256,8 +262,14 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
         const u = k && q.userById.get(k.user_id);
         if (!u) return null;
         if (!k.last_used || Date.now() - k.last_used > 60000) db.prepare('UPDATE api_keys SET last_used = ? WHERE id = ?').run(Date.now(), k.id);
+        const userSites = u.sites ? JSON.parse(u.sites) : null;
+        if (k.scope === 'hit') {
+          // never more than the account itself may see today (an account limited later narrows its old keys too)
+          const ks = JSON.parse(k.sites || '[]').filter((id) => userSites == null || userSites.includes(id));
+          return { kind: 'hitkey', role: 'viewer', sites: ks, user: u, keyId: k.id };
+        }
         const role = k.read_only ? 'viewer' : u.role;
-        return { kind: 'userkey', role, sites: u.sites ? JSON.parse(u.sites) : null, user: u, keyId: k.id };
+        return { kind: 'userkey', role, sites: userSites, user: u, keyId: k.id };
       }
       return null; // a wrong key is a failed sign-in, not an anonymous request
     }
@@ -278,6 +290,8 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   function auth(req, res, next) {
     const p = principal(req);
     if (!p) return res.status(401).json({ error: 'Not authenticated' });
+    // a server-mode key reports page views and does nothing else — not even read stats
+    if (p.kind === 'hitkey' && !(req.method === 'POST' && req.path === '/api/v1/hit')) return res.status(403).json({ error: 'This key can only report page views (POST /api/v1/hit)' });
     req.principal = p;
     next();
   }
@@ -498,7 +512,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     res.json(out);
   });
   const userOnly = (req, res, next) => {
-    if (req.principal.kind === 'userkey') return res.status(403).json({ error: 'API keys cannot change account settings — sign in' });
+    if (req.principal.kind === 'userkey' || req.principal.kind === 'hitkey') return res.status(403).json({ error: 'API keys cannot change account settings — sign in' });
     return req.principal.user ? next() : res.status(400).json({ error: 'Create an account first' });
   };
   async function needPassword(req, res) {
@@ -599,7 +613,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   });
 
   app.get('/api/audit', requireRole('owner'), (req, res) => {
-    if (req.principal.kind === 'userkey') return res.status(403).json({ error: 'API keys cannot read the audit log — sign in' });
+    if (req.principal.kind === 'userkey' || req.principal.kind === 'hitkey') return res.status(403).json({ error: 'API keys cannot read the audit log — sign in' });
     const before = Number(req.query.before) || Date.now() + 1;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     res.json(db.prepare('SELECT id, ts, actor, action, target, ip FROM audit_log WHERE ts < ? ORDER BY ts DESC, id DESC LIMIT ?').all(before, limit));
@@ -607,21 +621,32 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
 
   // ── personal API keys ──
   app.get('/api/me/keys', auth, userOnly, (req, res) => {
-    res.json(db.prepare('SELECT id, prefix, name, read_only, created, last_used FROM api_keys WHERE user_id = ? ORDER BY created').all(req.principal.user.id)
-      .map((k) => ({ ...k, read_only: !!k.read_only })));
+    res.json(db.prepare('SELECT id, prefix, name, read_only, scope, sites, created, last_used FROM api_keys WHERE user_id = ? ORDER BY created').all(req.principal.user.id)
+      .map((k) => ({ ...k, read_only: !!k.read_only, scope: k.scope || '', sites: k.sites ? JSON.parse(k.sites) : null })));
   });
   app.post('/api/me/keys', auth, userOnly, (req, res) => {
     const b = req.body || {};
     const n = db.prepare('SELECT COUNT(*) n FROM api_keys WHERE user_id = ?').get(req.principal.user.id).n;
     if (n >= 20) return res.status(400).json({ error: 'At most 20 keys per account' });
-    // a viewer can only ever get a read-only key
-    const readOnly = req.principal.role === 'viewer' ? true : b.readOnly !== false;
     const key = 'tk_' + crypto.randomBytes(24).toString('base64url');
     const name = String(b.name || '').trim().slice(0, 60) || 'API key';
+    if (b.scope === 'hit') {
+      // server mode: bound to explicit sites, never more than the account may see. Any role may create one —
+      // reporting page views is all it can do.
+      if (!Array.isArray(b.sites) || !b.sites.length) return res.status(400).json({ error: 'Pick the site(s) this server reports for' });
+      const ids = [...new Set(b.sites.map(Number))];
+      if (ids.some((id) => !allSiteIds().includes(id) || !siteAllowed(req, id))) return res.status(403).json({ error: 'You have no access to one of these sites' });
+      const info = db.prepare("INSERT INTO api_keys (key_hash, prefix, user_id, name, read_only, scope, sites, created) VALUES (?, ?, ?, ?, 1, 'hit', ?, ?)")
+        .run(sha256(key), key.slice(0, 10), req.principal.user.id, name, JSON.stringify(ids), Date.now());
+      audit(res, 'me.apikey.add', `${name} (${key.slice(0, 10)}…, server mode: sites ${ids.join(',')})`);
+      return res.json({ id: info.lastInsertRowid, key, name, read_only: true, scope: 'hit', sites: ids });
+    }
+    // a viewer can only ever get a read-only key
+    const readOnly = req.principal.role === 'viewer' ? true : b.readOnly !== false;
     const info = db.prepare('INSERT INTO api_keys (key_hash, prefix, user_id, name, read_only, created) VALUES (?, ?, ?, ?, ?, ?)')
       .run(sha256(key), key.slice(0, 10), req.principal.user.id, name, readOnly ? 1 : 0, Date.now());
     audit(res, 'me.apikey.add', `${name} (${key.slice(0, 10)}…, ${readOnly ? 'read-only' : 'read + write'})`);
-    res.json({ id: info.lastInsertRowid, key, name, read_only: readOnly }); // the key is shown exactly once
+    res.json({ id: info.lastInsertRowid, key, name, read_only: readOnly, scope: '' }); // the key is shown exactly once
   });
   app.delete('/api/me/keys/:id', auth, userOnly, (req, res) => {
     const k = db.prepare('SELECT name, prefix FROM api_keys WHERE id = ? AND user_id = ?').get(Number(req.params.id), req.principal.user.id);
@@ -633,7 +658,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
   // ── team (owner) ───────────────────────────────────────────────────────────
   // team management needs a real sign-in (or the server API_KEY): a personal key that leaks must not
   // be able to invite, promote or remove people
-  const ownerOnly = (req, res, next) => requireRole('owner')(req, res, () => (req.principal.kind === 'userkey'
+  const ownerOnly = (req, res, next) => requireRole('owner')(req, res, () => (req.principal.kind === 'userkey' || req.principal.kind === 'hitkey'
     ? res.status(403).json({ error: 'API keys cannot manage the team — sign in' }) : next()));
 
   // first account: only from a legacy (WEB_PASSWORD) or API-key session, only while there are none

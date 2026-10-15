@@ -136,7 +136,7 @@ Server mode runs no script and reads or stores nothing on the visitor's device. 
 
 ```http
 POST /api/v1/hit
-Authorization: Bearer tk_…            # a key created with write access (Settings → API keys), not read-only
+Authorization: Bearer tk_…            # a "server mode (count only)" key (Settings → API keys)
 Content-Type: application/json
 
 { "domain": "example.com", "path": "/shop?utm_source=news", "ip": "203.0.113.7",
@@ -144,21 +144,32 @@ Content-Type: application/json
   "purpose": "<Sec-Purpose or Purpose header>" }
 ```
 
-Node / Express, after your static files and before your pages:
+Node / Express, after your static files and before your pages. It reports only page loads that ended with `200` (no 404s, no redirects) and only for clients that asked for HTML:
 
 ```js
 app.use((req, res, next) => {
-  if (req.method === 'GET' && req.accepts('html')) fetch('https://analytics.example.com/api/v1/hit', {
-    method: 'POST', headers: { Authorization: 'Bearer ' + process.env.TACILYTICS_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain: 'example.com', path: req.originalUrl, ip: req.ip, ua: req.get('user-agent'),
-      referrer: req.get('referer'), lang: req.get('accept-language'), purpose: req.get('sec-purpose') || req.get('purpose') }),
-  }).catch(() => {});
+  if (req.method !== 'GET' || req.accepts(['html', 'json']) !== 'html') return next();
+  res.on('finish', () => {
+    if (res.statusCode !== 200) return;
+    fetch('https://analytics.example.com/api/v1/hit', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + process.env.TACILYTICS_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain: 'example.com', path: req.originalUrl, ip: req.ip, ua: req.get('user-agent'),
+        referrer: req.get('referer'), lang: req.get('accept-language'), purpose: req.get('sec-purpose') || req.get('purpose') }),
+    }).then((r) => { if (r.status === 429) console.warn('tacilytics: rate limited'); }).catch(() => {});
+  });
   next();
 });
 ```
 
-- **The visitor IP** is only accepted here, with a write key, never on the public `/api/collect`. It is hashed like a tracker hit (daily salt) and never stored. Behind a proxy or load balancer, send the real visitor IP (e.g. `req.ip` with Express `trust proxy` set right), not your proxy's. Without an IP the hit is refused (`400`), because all visitors would fall onto one hash.
-- **Filtered on our side:** bots and monitors (same list as the tracker), requests without a user agent, prefetch / prerender (`purpose`), and `dnt: true` / `gpc: true` if you choose to forward those headers. A site-limited key can only report for its own sites.
+**Which key goes on the web server.** Web servers are where sites get broken into, so the key there should be able to do as little as possible:
+
+- Create a **server mode (count only)** key under Settings → API keys and tick the site(s) it reports for. It can call `POST /api/v1/hit` for those sites and nothing else (`403` everywhere else, reads included), and it never reaches more than the account that created it.
+- **Never** put the `API_KEY` from `.env` on a web server. It is the owner key for every site on the instance.
+- Don't use a read + write key either. It still works on `/api/v1/hit` (as in 2.4.0), but a stolen one can also create public share links, point alert webhooks at any URL, upload or delete imports, and change notes, funnels and the time zone of its sites.
+- If several sites run on different servers, give each server its own key, so one break-in can be revoked without touching the others.
+
+- **The visitor IP** is only accepted here, with a server-mode or write key, never on the public `/api/collect`. It is hashed like a tracker hit (daily salt) and never stored. Behind a proxy or load balancer, send the real visitor IP (e.g. `req.ip` with Express `trust proxy` set right), not your proxy's. Without an IP the hit is refused (`400`), because all visitors would fall onto one hash.
+- **Filtered on our side:** bots and monitors (same list as the tracker), requests without a user agent, prefetch / prerender (`purpose`), and `dnt: true` / `gpc: true` if you choose to forward those headers. A key can only report for its own sites. The rate limit (6,000 page views a minute) applies per key, so sites on one shared-hosting IP don't block each other; above it the API answers `429` and the hit is not counted.
 - **Page caches and CDNs:** if a cache plugin or a CDN (e.g. Cloudflare) answers the request, your server code never runs and the visit is not reported. Report from somewhere every request passes, or exclude HTML from the cache.
 - **What you give up compared with the script:** no time on page, no scroll depth, no click / outbound / download events, no country, and no `?tacilytics=off`. Server-side goals work: add `"name": "Purchase", "props": { "value": 49.9 }`.
 - **Data protection:** the IP and user agent are personal data while they are hashed. That needs a legal basis (typically legitimate interest, GDPR Art. 6(1)(f)) and a sentence in your privacy policy. If someone else runs Tacilytics for you (for example Tacilytics Cloud), your server passes visitor IPs to them, so you need a data processing agreement (DPA). Server mode does not decide whether you need consent for the rest of your website. This is not legal advice.
@@ -273,7 +284,7 @@ curl -H "Authorization: Bearer $TACILYTICS_API_KEY" \
 | `POST /api/v1/sites` | add a site `{ domain }` |
 | `GET /api/v1/stats?site=&period=` | aggregated stats — `today \| 7d \| 30d \| 90d \| 12mo`, or `from=YYYY-MM-DD&to=YYYY-MM-DD` |
 | `GET /api/v1/realtime?site=` | online count, 30-min pulse + recent events |
-| `POST /api/v1/hit` | server mode: report a page view from your web server (write key), see [Server mode](#server-mode-no-script-at-all) |
+| `POST /api/v1/hit` | server mode: report a page view from your web server (server-mode key), see [Server mode](#server-mode-no-script-at-all) |
 
 Add any of `country, source, page, browser, os, device, lang, medium, campaign, goal` to `/stats` to segment, e.g. `…/stats?site=example.com&period=30d&country=DE&medium=email`.
 

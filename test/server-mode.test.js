@@ -120,6 +120,85 @@ test('server mode: POST /api/v1/hit', async (t) => {
     const db2 = new Database(DB_PATH); db2.prepare('UPDATE sites SET paused = 0 WHERE id = ?').run(a.id); db2.close();
   });
 
+  // ── 2.4.1: server-mode (count only) keys ──
+  const mk = async (body, who = alice) => j('POST', '/api/me/keys', { name: 'srv', ...body }, who);
+  const hk = (await mk({ scope: 'hit', sites: [a.id] })).data.key;
+  const hitH = { Authorization: 'Bearer ' + hk };
+
+  await t.test('a hit key reports for its site', async () => {
+    assert.strictEqual((await hit({ path: '/hk-ok' }, hitH)).status, 204);
+    assert.ok(rows().some((r) => r.path === '/hk-ok' && r.site_id === a.id));
+  });
+
+  await t.test('a hit key gets 403 on every other route, reads included', async () => {
+    const routes = [
+      ['GET', '/api/sites'], ['GET', '/api/v1/sites'], ['GET', '/api/stats?site=alpha.test'], ['GET', '/api/v1/stats?site=alpha.test'],
+      ['GET', '/api/realtime?site=alpha.test'], ['GET', '/api/v1/realtime?site=alpha.test'], ['GET', '/api/v1/usage'],
+      ['GET', '/api/me'], ['GET', '/api/me/keys'], ['POST', '/api/me/keys'], ['GET', '/api/team'], ['POST', '/api/team/invites'],
+      ['GET', '/api/shares?site=alpha.test'], ['POST', '/api/shares', { site: 'alpha.test' }],
+      ['GET', '/api/alerts?site=alpha.test'], ['POST', '/api/alerts', { site: 'alpha.test', type: 'spike' }],
+      ['GET', '/api/imports?site=alpha.test'], ['DELETE', '/api/imports/1'],
+      ['GET', '/api/annotations?site=alpha.test'], ['POST', '/api/annotations', { site: 'alpha.test', day: '2026-10-15', text: 'x' }],
+      ['GET', '/api/funnels?site=alpha.test'], ['POST', '/api/funnels', { site: 'alpha.test', name: 'f', steps: [] }],
+      ['POST', '/api/sites', { domain: 'x.test' }], ['POST', '/api/v1/sites', { domain: 'x.test' }], ['PATCH', '/api/sites/' + a.id, { tz: 'Europe/Berlin' }],
+      ['DELETE', '/api/sites/' + a.id], ['GET', '/api/audit'], ['POST', '/api/me/password', {}],
+    ];
+    for (const [m, u, body] of routes) {
+      const r = await j(m, u, body, hitH);
+      assert.strictEqual(r.status, 403, `${m} ${u} → ${r.status}`);
+    }
+    const r = await fetch(base + '/api/imports?site=alpha.test', { method: 'POST', headers: { ...hitH, 'Content-Type': 'application/octet-stream' }, body: 'x' });
+    assert.strictEqual(r.status, 403, 'raw import upload');
+  });
+
+  await t.test('a hit key is bound to the sites it was created for', async () => {
+    assert.strictEqual((await hit({ domain: 'bravo.test', path: '/hk-foreign' }, hitH)).status, 404);
+    // the operator can bind one to bravo only → it cannot report for alpha
+    const ob = (await mk({ scope: 'hit', sites: [b.id] }, owner)).data.key;
+    assert.strictEqual((await hit({ domain: 'alpha.test', path: '/hk-ob-a' }, { Authorization: 'Bearer ' + ob })).status, 404);
+    assert.strictEqual((await hit({ domain: 'bravo.test', path: '/hk-ob-b' }, { Authorization: 'Bearer ' + ob })).status, 204);
+    assert.ok(!rows().some((r) => r.path === '/hk-foreign' || r.path === '/hk-ob-a'));
+  });
+
+  await t.test('a hit key can never cover more than its account', async () => {
+    assert.strictEqual((await mk({ scope: 'hit', sites: [b.id] })).status, 403, 'alice cannot bind bravo');
+    assert.strictEqual((await mk({ scope: 'hit', sites: [a.id, b.id] })).status, 403);
+    assert.strictEqual((await mk({ scope: 'hit', sites: [] })).status, 400);
+    assert.strictEqual((await mk({ scope: 'hit' })).status, 400);
+    assert.strictEqual((await mk({ scope: 'hit', sites: [99999] })).status, 403);
+    // narrowing the account later narrows its existing hit keys too
+    const db = new Database(DB_PATH);
+    const aliceId = db.prepare("SELECT id FROM users WHERE username = 'alice'").get().id;
+    db.prepare("INSERT INTO api_keys (key_hash, prefix, user_id, name, read_only, scope, sites, created) VALUES (?, 'tk_x', ?, 'forged', 1, 'hit', ?, ?)")
+      .run(require('crypto').createHash('sha256').update('tk_forgedforgedforgedforged').digest('hex'), aliceId, JSON.stringify([a.id, b.id]), Date.now());
+    db.close();
+    assert.strictEqual((await hit({ domain: 'bravo.test', path: '/hk-forged' }, { Authorization: 'Bearer tk_forgedforgedforgedforged' })).status, 404);
+  });
+
+  await t.test('old keys keep exactly their rights; hits do not flood the audit log', async () => {
+    const keys = (await j('GET', '/api/me/keys', undefined, alice)).data;
+    assert.strictEqual(keys.find((k) => k.name === 'server').scope, '');
+    assert.strictEqual(keys.find((k) => k.name === 'read').read_only, true);
+    assert.strictEqual((await j('GET', '/api/v1/sites', undefined, { Authorization: 'Bearer ' + rk })).status, 200, 'read-only key still reads');
+    assert.strictEqual((await hit({ path: '/wk-still' })).status, 204, 'write key still reports (2.4.0 compatible)');
+    const db = new Database(DB_PATH, { readonly: true });
+    const n = db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action LIKE '%/api/v1/hit%'").get().n;
+    const add = db.prepare("SELECT target FROM audit_log WHERE action = 'me.apikey.add' AND target LIKE '%server mode%'").all();
+    db.close();
+    assert.strictEqual(n, 0, 'page views are not audit events');
+    assert.ok(add.length >= 1, 'creating a hit key is audited');
+  });
+
+  await t.test('rate limit is per key, not per web-server IP', async () => {
+    const k1 = (await mk({ scope: 'hit', sites: [a.id] })).data.key;
+    const k2 = (await mk({ scope: 'hit', sites: [a.id] })).data.key;
+    const fire = (k) => fetch(base + '/api/v1/hit', { method: 'POST', headers: { Authorization: 'Bearer ' + k, 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: 'alpha.test', path: '/rl', ip: '198.51.100.9', ua: UA }) }).then((r) => r.status);
+    let last = 0;
+    for (let i = 0; i < 6001; i += 200) { const st = await Promise.all(Array.from({ length: Math.min(200, 6001 - i) }, () => fire(k1))); last = st[st.length - 1]; }
+    assert.strictEqual(last, 429, 'k1 exhausted');
+    assert.strictEqual(await fire(k2), 204, 'k2 from the same IP is not affected');
+  });
+
   await t.test('optional server-side goal with properties', async () => {
     await hit({ path: '/checkout/finish', name: 'Purchase', props: { value: 49.9, currency: 'EUR' } });
     const r = rows().find((x) => x.path === '/checkout/finish');

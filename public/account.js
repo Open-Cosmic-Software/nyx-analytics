@@ -277,11 +277,13 @@
       '<p class="muted">Every Monday morning, for each of your sites: key figures, a day-by-day chart, highlights, top pages, sources, countries, devices, goals, shop numbers and your notes — compared with the week before.</p>' +
       '<div id="repBox"><p class="muted small">Loading…</p></div></div>' +
       '<div class="set-card"><h3>' + ico('i-code') + 'API keys</h3>' +
-      '<p class="muted">For scripts, agents and the CLI (<code>TACILYTICS_API_KEY</code>). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.</p>' +
+      '<p class="muted">For scripts, agents and the CLI (<code>TACILYTICS_API_KEY</code>). A key acts as you, sees only your sites, and cannot touch the team or your security settings.</p>' +
+      '<p class="muted small">For server mode, create a “server mode (count only)” key: it can only report page views for the sites you tick, nothing else. Never put a read + write key on a web server.</p>' +
       '<div id="keyList"><p class="muted small">Loading…</p></div>' +
       '<div class="set-inline"><input id="keyName" type="text" placeholder="Name, e.g. reporting script" maxlength="60">' +
-      (me.role !== 'viewer' ? '<label class="small muted" style="display:inline-flex;gap:6px;align-items:center;flex:0 0 auto"><input type="checkbox" id="keyRo" checked style="width:auto;margin:0"> read-only</label>' : '') +
-      '<button class="btn" id="keyAdd">Create key</button></div><div id="keyOut"></div></div>' +
+      '<select id="keyKind" style="flex:0 0 auto;width:auto"><option value="ro">read-only</option>' + (me.role !== 'viewer' ? '<option value="rw">read + write</option>' : '') + '<option value="hit">server mode (count only)</option></select>' +
+      '<button class="btn" id="keyAdd">Create key</button></div>' +
+      '<div id="keySites" class="hide small muted" style="margin-top:8px"></div><div id="keyOut"></div></div>' +
       '<div class="set-card"><h3>' + ico('i-shield') + 'Password</h3>' +
       '<div class="set-inline"><input id="pwOld" type="password" placeholder="Current password" autocomplete="current-password"><input id="pwNew" type="password" placeholder="New password (10+)" autocomplete="new-password"><button class="btn ghost" id="pwSave">Change</button></div>' +
       '<p class="muted small">Changing it signs you out on all other devices.</p></div>' +
@@ -343,7 +345,7 @@
     function loadKeys() {
       call('GET', '/api/me/keys').then(function (keys) {
         $('keyList').innerHTML = keys.length ? keys.map(function (k) {
-          return '<div class="set-row"><span>' + ico('i-code') + esc(k.name) + ' <code class="muted small">' + esc(k.prefix) + '…</code>' + (k.read_only ? ' <span class="pill">read-only</span>' : ' <span class="pill">read + write</span>') + '</span>' +
+          return '<div class="set-row"><span>' + ico('i-code') + esc(k.name) + ' <code class="muted small">' + esc(k.prefix) + '…</code>' + (k.scope === 'hit' ? ' <span class="pill"><span>server mode</span> · <span data-no-i18n>' + esc(siteNames(k.sites)) + '</span></span>' : k.read_only ? ' <span class="pill">read-only</span>' : ' <span class="pill">read + write</span>') + '</span>' +
             '<span class="muted small">' + (k.last_used ? 'used ' + date(k.last_used) : 'never used') + '</span><button class="btn ghost danger mini" data-delkey="' + k.id + '">Revoke</button></div>';
         }).join('') : '<p class="muted small">No keys yet.</p>';
         $('keyList').querySelectorAll('[data-delkey]').forEach(function (b) {
@@ -352,9 +354,21 @@
       }).catch(function (e) { setErr(e.message); });
     }
     loadKeys();
+    var siteList = (window.Taci && window.Taci.sites && window.Taci.sites()) || [];
+    $('keyKind').onchange = function () {
+      var hit = this.value === 'hit';
+      $('keySites').classList.toggle('hide', !hit);
+      if (hit && !$('keySites').innerHTML) $('keySites').innerHTML = 'Reports for: ' + siteList.map(function (st) {
+        return '<label style="display:inline-flex;gap:4px;align-items:center;margin-right:10px"><input type="checkbox" class="keySite" value="' + st.id + '" style="width:auto;margin:0"' + (siteList.length === 1 ? ' checked' : '') + '>' + esc(st.domain) + '</label>';
+      }).join('');
+    };
     $('keyAdd').onclick = function () {
       setErr('');
-      call('POST', '/api/me/keys', { name: $('keyName').value.trim(), readOnly: $('keyRo') ? $('keyRo').checked : true }).then(function (k) {
+      var kind = $('keyKind').value;
+      var body = { name: $('keyName').value.trim() };
+      if (kind === 'hit') { body.scope = 'hit'; body.sites = Array.prototype.map.call(document.querySelectorAll('.keySite:checked'), function (c) { return Number(c.value); }); }
+      else body.readOnly = kind !== 'rw';
+      call('POST', '/api/me/keys', body).then(function (k) {
         $('keyName').value = '';
         $('keyOut').innerHTML = '<p class="muted small" style="margin:10px 0 4px">Copy it now — it is shown only once.</p><div class="snippet">' + esc(k.key) + '</div><button class="btn ghost mini" id="keyCopy">Copy key</button>';
         $('keyCopy').onclick = function () { navigator.clipboard.writeText(k.key); this.textContent = 'Copied ✓'; };

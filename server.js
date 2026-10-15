@@ -402,6 +402,7 @@ const { auth, requireRole, siteAllowed, audit, grantSite, isLimited } = setupAut
   allSiteIds: () => db.prepare('SELECT id FROM sites').all().map((r) => r.id),
 });
 const adminOnly = requireRole('admin');
+const ROLE_RANK = { viewer: 1, admin: 2, owner: 3 };
 
 // share-token auth: read-only stats access scoped to exactly one site.
 // Accepted as ?share=<token>; the handler must check siteOk(req, site).
@@ -501,7 +502,7 @@ app.get('/api/v1', (_req, res) => res.json({
     'GET /api/v1/stats?site=&period=': 'aggregated stats (period: today|7d|30d|90d|12mo, or from=YYYY-MM-DD&to=YYYY-MM-DD)',
     'GET /api/v1/realtime?site=': 'online count, last-30-min pulse + recent events',
     'GET /api/v1/usage?month=YYYY-MM': 'page views per site in a calendar month (UTC), owner / server key only',
-    'POST /api/v1/hit': 'server mode: report a page view from your web server { domain, path, ip, ua, referrer?, lang?, purpose?, name? } (write key)',
+    'POST /api/v1/hit': 'server mode: report a page view from your web server { domain, path, ip, ua, referrer?, lang?, purpose?, name? } (server-mode key)',
   },
   filters: 'add any of country,source,page,browser,os,device,lang,medium,campaign,goal to /stats to segment',
 }));
@@ -524,9 +525,13 @@ app.post('/api/v1/sites', adminOnly, sitesCreateHandler);
 // exactly like a tracker hit and never stored.
 const net = require('net');
 const PREFETCH_RE = /prefetch|prerender/i;
-// write access needed (admin role or a non-read-only key); a read-only key is a viewer and gets 403
-app.post('/api/v1/hit', adminOnly, (req, res) => {
-  if (rateLimited('h:' + clientIp(req), 6000, 60000)) return res.status(429).json({ error: 'Too many hits' });
+// Who may report: a server-mode key (scope 'hit', recommended, bound to its sites and good for nothing else), or —
+// as in 2.4.0 — a key / sign-in with write access (admin role). A read-only key is a viewer and gets 403.
+app.post('/api/v1/hit', auth, (req, res) => {
+  const p = req.principal;
+  if (p.kind !== 'hitkey' && ROLE_RANK[p.role] < ROLE_RANK.admin) return res.status(403).json({ error: 'Use a server-mode key (Settings → API keys)' });
+  // per key, not per web-server IP: many sites behind one shared-hosting IP must not starve each other
+  if (rateLimited('h:' + (p.keyId != null ? 'k' + p.keyId : p.kind + ':' + (p.user ? p.user.id : '')), 6000, 60000)) return res.status(429).json({ error: 'Too many hits' });
   const b = req.body || {};
   const domain = norm(b.domain || b.d);
   const site = domain && getSiteByDomain.get(domain);
