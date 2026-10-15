@@ -54,6 +54,7 @@
     "report.js",
     "webhook.js",
     "tz-country.js",
+    "tz.js",
     "public/",
     "sdk/flutter/",
     "!sdk/flutter/.dart_tool/",
