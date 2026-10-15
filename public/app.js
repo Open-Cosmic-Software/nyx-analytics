@@ -14,7 +14,7 @@
     }
   } catch (e) { /* corrupt value → keep both visible */ }
   var lastStats = null;
-  function closeModal(ov) { window.TaciModal.close(ov); } // one close path for all modals (account.js)
+  function closeModal(ov, opt) { return window.TaciModal.close(ov, opt); } // one close path for all modals (account.js)
   // dashboard segmentation filters (whitelist mirrors the server's FILTER_COLS + goal)
   var FILTER_LABELS = { country: 'Country', source: 'Source', page: 'Page', browser: 'Browser', os: 'OS', device: 'Device', lang: 'Language', medium: 'Medium', campaign: 'Campaign', platform: 'Platform', version: 'App version', goal: 'Goal' };
 
@@ -125,7 +125,7 @@
   $('siteSelect').onchange = function () { state.site = this.value; localStorage.setItem('nyx_site', state.site); load(); if (typeof loadFunnels === 'function') loadFunnels(); };
 
   $('addSiteBtn').onclick = function () { $('addModal').classList.remove('hide'); $('newDomain').value = ''; $('addErr').textContent = ''; $('newDomain').focus(); };
-  $('cancelAdd').onclick = function () { closeModal($('addModal')); };
+  $('cancelAdd').onclick = function () { closeModal($('addModal'), { force: true }); };
   $('createSiteBtn').onclick = function () {
     var d = $('newDomain').value.trim();
     api('/api/sites', { method: 'POST', body: JSON.stringify({ domain: d }) }).then(function (s) {
@@ -487,6 +487,8 @@
   // ── alerts ──
   var KIND_LABEL = { spike: 'Traffic spike', drop: 'Traffic drop', goal: 'Goal' };
   function openAlerts() {
+    // a fresh form only when the modal opens — openAlerts also re-renders the list while it is open
+    if ($('alertsModal').classList.contains('hide')) { $('alKind').value = 'spike'; $('alGoalRow').classList.add('hide'); $('alGoal').value = ''; $('alThreshold').value = '10'; $('alWindow').value = '24'; $('alWebhook').value = ''; }
     $('alertsModal').classList.remove('hide'); $('alertsErr').textContent = ''; $('alertsSite').textContent = state.site;
     var goals = ((lastStats && lastStats.goals) || []).map(function (g) { return g.name; });
     $('alGoalList').innerHTML = goals.map(function (g) { return '<option value="' + esc(g) + '">'; }).join('');
@@ -514,7 +516,7 @@
     });
   }
   $('alertsBtn').onclick = openAlerts;
-  $('closeAlerts').onclick = function () { closeModal($('alertsModal')); };
+  $('closeAlerts').onclick = function () { closeModal($('alertsModal'), { force: true }); };
   $('alKind').onchange = function () { $('alGoalRow').classList.toggle('hide', this.value !== 'goal'); };
   $('alAdd').onclick = function () {
     $('alertsErr').textContent = '';
@@ -522,14 +524,14 @@
     if (body.kind === 'goal') { body.goal = $('alGoal').value.trim(); body.threshold = Number($('alThreshold').value); body.window_hours = Number($('alWindow').value); }
     api('/api/alerts', { method: 'POST', body: JSON.stringify(body) }).then(function (r) {
       if (r.error) { $('alertsErr').textContent = r.error; return; }
-      $('alWebhook').value = ''; openAlerts();
+      $('alWebhook').value = ''; window.TaciModal.snapshot($('alertsModal')); openAlerts();
     });
   };
 
   // ── add / list annotations ──
   function openAnnotations() {
     $('annModal').classList.remove('hide'); $('annErr').textContent = '';
-    $('annDay').value = new Date().toISOString().slice(0, 10); $('annText').value = ''; $('annText').focus();
+    $('annDay').value = new Date().toISOString().slice(0, 10); $('annText').value = ''; $('annText').focus(); window.TaciModal.snapshot($('annModal')); // also when re-opened after a save
     api('/api/annotations?site=' + encodeURIComponent(state.site)).then(function (list) {
       $('annList').innerHTML = (list || []).length ? list.map(function (a) {
         return '<div class="set-row"><span><strong>' + esc(a.day) + '</strong> <span data-no-i18n>' + esc(a.text) + '</span>' + (a.created_by ? ' <span class="muted small">· ' + esc(a.created_by) + '</span>' : '') + '</span>' +
@@ -541,7 +543,7 @@
     });
   }
   $('annBtn').onclick = openAnnotations;
-  $('closeAnn').onclick = function () { closeModal($('annModal')); };
+  $('closeAnn').onclick = function () { closeModal($('annModal'), { force: true }); };
   $('saveAnn').onclick = function () {
     api('/api/annotations', { method: 'POST', body: JSON.stringify({ site: state.site, day: $('annDay').value, text: $('annText').value }) }).then(function (r) {
       if (r.error) { $('annErr').textContent = r.error; return; }
@@ -891,7 +893,7 @@
     $('funnelModal').classList.remove('hide'); $('funnelName').focus();
   };
   $('addStepBtn').onclick = function () { if ($('funnelSteps').children.length < 8) $('funnelSteps').appendChild(stepRow()); };
-  $('cancelFunnel').onclick = function () { closeModal($('funnelModal')); };
+  $('cancelFunnel').onclick = function () { closeModal($('funnelModal'), { force: true }); };
   $('createFunnelBtn').onclick = function () {
     var steps = Array.prototype.map.call($('funnelSteps').children, function (row) {
       return { type: row.querySelector('.step-type').value, value: row.querySelector('.step-value').value.trim() };

@@ -514,11 +514,29 @@
   // ── closing modals: ONE function for every exit (X, Close button, Esc, click on the backdrop) ──
   // login / reset / invite are not closable — there is nothing behind them without signing in.
   var LOCKED = { login: 1, reset: 1, invite: 1 };
-  function closeModal(ov) {
-    if (!ov || LOCKED[ov.id] || ov.classList.contains('hide')) return;
+  // form modals (data-guard): Esc and the backdrop ask before throwing away what was typed (Fabian, variant C).
+  // "Changed" = the fields differ from a snapshot taken when the modal opened (or after a save) — typing
+  // something and deleting it again is no change. X and Cancel are a deliberate click and close directly.
+  function fields(ov) { return [].map.call(ov.querySelectorAll('input, select, textarea'), function (f) { return f.type === 'checkbox' || f.type === 'radio' ? String(f.checked) : f.value; }).join('\u0000'); }
+  function snapshot(ov) { if (ov) ov.__taciSnap = fields(ov); }
+  function isDirty(ov) { return !!ov && ov.hasAttribute('data-guard') && ov.__taciSnap != null && fields(ov) !== ov.__taciSnap; }
+  function closeModal(ov, opt) {
+    if (!ov || LOCKED[ov.id] || ov.classList.contains('hide')) return false;
+    if (!(opt && opt.force) && isDirty(ov) && !window.confirm(tr('Discard your changes?'))) return false;
+    ov.__taciSnap = null;
     ov.classList.add('hide');
     ov.dispatchEvent(new CustomEvent('taci:close')); // e.g. the live view stops polling
+    return true;
   }
+  function tr(t) { return (window.TaciLang && window.TaciLang.t) ? window.TaciLang.t(t) : t; }
+  // a guarded modal takes its snapshot when it becomes visible — after its opener has filled the defaults
+  new MutationObserver(function (list) {
+    list.forEach(function (m) {
+      var o = m.target; if (!o.hasAttribute('data-guard')) return;
+      if (o.classList.contains('hide')) o.__taciSnap = null; // closed by any path (also a successful save) → next open starts fresh
+      else if (o.__taciSnap == null) snapshot(o);
+    });
+  }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
   function topModal() {
     var open = [].filter.call(document.querySelectorAll('.modal-overlay'), function (o) { return !o.classList.contains('hide'); });
     // a locked one (e.g. login after the session expired) wins even though it sits first in the DOM —
@@ -528,7 +546,7 @@
   }
   document.addEventListener('click', function (e) {
     var x = e.target.closest && e.target.closest('[data-close]');
-    if (x) closeModal(x.closest('.modal-overlay'));
+    if (x) closeModal(x.closest('.modal-overlay'), { force: true });
   });
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -542,5 +560,5 @@
     var t = e.target;
     if (t.classList && t.classList.contains('modal-overlay') && downOn === t && topModal() === t) closeModal(t);
   });
-  window.TaciModal = { close: closeModal };
+  window.TaciModal = { close: closeModal, snapshot: snapshot, isDirty: isDirty };
 })();

@@ -130,6 +130,7 @@
     'Visitors on imported days are summed per day, not unique across days.': 'Besucher an importierten Tagen werden pro Tag summiert, nicht über Tage hinweg eindeutig gezählt.',
     'Tacilytics · open source ·': 'Tacilytics · Open Source ·',
     '· open source ·': '· Open Source ·',
+    'Discard your changes?': 'Änderungen verwerfen?',
     'Direct / none': 'Direkt / keine', 'Android app': 'Android-App', 'iOS app': 'iOS-App', 'Web': 'Web',
     'For scripts, agents and the CLI (': 'Für Skripte, Agents und die CLI (',
     '). A key acts as you, sees only your sites, and cannot touch the team or your security settings. Read-only unless you untick it.': '). Ein Key handelt als du, sieht nur deine Seiten und kann weder das Team noch deine Sicherheitseinstellungen ändern. Nur lesen, außer du nimmst den Haken raus.',
@@ -229,5 +230,6 @@
     get: function () { try { return localStorage.getItem('tacilytics_lang') || 'auto'; } catch (e) { return 'auto'; } },
     set: function (v) { try { localStorage.setItem('tacilytics_lang', v); } catch (e) {} location.reload(); },
     current: L,
+    t: function (s) { var r = tr(s); return r == null ? s : r; }, // for texts that never reach the DOM (confirm())
   };
 })();
