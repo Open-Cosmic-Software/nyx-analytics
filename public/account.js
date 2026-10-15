@@ -165,6 +165,7 @@
     call('GET', '/api/me').then(function (m) {
       me = m;
       $('setTabs').querySelector('[data-t="team"]').classList.toggle('hide', m.role !== 'owner');
+      $('setTabs').querySelector('[data-t="activity"]').classList.toggle('hide', m.role !== 'owner');
       showTab(tab || 'security');
     }).catch(function (e) { setErr(e.message); });
   }
@@ -172,8 +173,9 @@
     Array.prototype.forEach.call($('setTabs').children, function (b) { b.classList.toggle('active', b.dataset.t === t); });
     $('setSecurity').classList.toggle('hide', t !== 'security');
     $('setTeam').classList.toggle('hide', t !== 'team');
+    $('setActivity').classList.toggle('hide', t !== 'activity');
     setErr('');
-    if (t === 'security') renderSecurity(); else renderTeam();
+    if (t === 'security') renderSecurity(); else if (t === 'team') renderTeam(); else renderActivity();
   }
   $('settingsBtn').onclick = function () { openSettings(); };
   $('closeSettings').onclick = function () { $('settingsModal').classList.add('hide'); };
@@ -415,6 +417,33 @@
           };
         };
       });
+    }).catch(function (e) { setErr(e.message); });
+  }
+
+  // activity (audit log, owner)
+  var ACTION_LABEL = {
+    'site.add': 'added site', 'site.remove': 'removed site', 'share.add': 'created share link', 'share.revoke': 'revoked share link',
+    'note.add': 'added note', 'note.remove': 'removed note', 'funnel.add': 'added funnel', 'funnel.remove': 'removed funnel',
+    'team.first-owner': 'created the first account', 'team.invite': 'created invite', 'team.invite.revoke': 'revoked invite',
+    'team.join': 'joined via invite', 'team.change': 'changed role', 'team.remove': 'removed member', 'team.2fa.reset': 'reset 2FA of',
+    'team.reset-link': 'created password link for', 'me.password': 'changed own password', 'me.password.reset-link': 'set a new password via link',
+    'me.2fa.on': 'turned 2FA on', 'me.2fa.off': 'turned 2FA off', 'me.recovery.new': 'made new recovery codes',
+    'me.passkey.add': 'added passkey', 'me.passkey.remove': 'removed passkey', 'me.apikey.add': 'created API key', 'me.apikey.revoke': 'revoked API key',
+  };
+  function renderActivity(before, append) {
+    var el = $('setActivity');
+    call('GET', '/api/audit?limit=60' + (before ? '&before=' + before : '')).then(function (rows) {
+      var html = rows.map(function (e) {
+        var when = new Date(e.ts);
+        return '<div class="set-row act-row"><span class="muted small act-time" title="' + esc(when.toISOString()) + '">' +
+          esc(when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })) + '</span>' +
+          '<span><strong>' + esc(e.actor || 'someone') + '</strong> ' + esc(ACTION_LABEL[e.action] || e.action) + (e.target ? ' <span class="act-target">' + esc(e.target) + '</span>' : '') + '</span>' +
+          '<span class="muted small act-ip">' + esc(e.ip || '') + '</span></div>';
+      }).join('');
+      if (!append) el.innerHTML = '<div class="set-card"><h3>' + ico('i-timer') + 'Activity</h3><p class="muted">Every change by anyone on the team, newest first. Kept for a year (AUDIT_RETENTION_DAYS).</p><div id="actRows"></div><div id="actMore"></div></div>';
+      $('actRows').insertAdjacentHTML('beforeend', html || (append ? '' : '<p class="muted small">Nothing yet.</p>'));
+      $('actMore').innerHTML = rows.length === 60 ? '<button class="btn ghost mini" id="actMoreBtn">Older</button>' : '';
+      if (rows.length === 60) $('actMoreBtn').onclick = function () { renderActivity(rows[rows.length - 1].ts, true); };
     }).catch(function (e) { setErr(e.message); });
   }
 

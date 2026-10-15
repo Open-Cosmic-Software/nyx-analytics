@@ -355,7 +355,7 @@ app.get('/api/collect', collect);
 
 // ── auth: accounts, team, optional 2FA + passkeys (auth.js) ───────────────────
 const { setupAuth } = require('./auth');
-const { auth, requireRole, siteAllowed } = setupAuth({
+const { auth, requireRole, siteAllowed, audit } = setupAuth({
   app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp,
   allSiteIds: () => db.prepare('SELECT id FROM sites').all().map((r) => r.id),
 });
@@ -390,6 +390,7 @@ const sitesCreateHandler = (req, res) => {
   // Allow ASCII domains AND Punycode (xn--...). Unicode input was converted above.
   if (!domain || !/^[a-z0-9.-]+\.[a-z0-9-]{2,}$/.test(domain)) return res.status(400).json({ error: 'Enter a valid domain, e.g. example.com' });
   insSite.run(domain, (req.body && req.body.name) || displayName, Date.now());
+  audit(res, 'site.add', domain);
   res.json(getSiteByDomain.get(domain));
 };
 app.get('/api/sites', auth, sitesListHandler);
@@ -397,6 +398,8 @@ app.post('/api/sites', adminOnly, sitesCreateHandler);
 app.delete('/api/sites/:id', adminOnly, (req, res) => {
   const id = Number(req.params.id);
   if (!siteAllowed(req, id)) return res.status(403).json(NO_SITE);
+  const gone = db.prepare('SELECT domain FROM sites WHERE id = ?').get(id);
+  audit(res, 'site.remove', gone ? gone.domain : '#' + id);
   db.prepare('DELETE FROM events WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM annotations WHERE site_id = ?').run(id);
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
@@ -709,11 +712,13 @@ app.post('/api/shares', adminOnly, (req, res) => {
   if (!siteOk(req, site)) return res.status(403).json(NO_SITE);
   const token = newToken();
   db.prepare('INSERT INTO shares (token, site_id, created) VALUES (?, ?, ?)').run(token, site.id, Date.now());
+  audit(res, 'share.add', site.domain);
   res.json({ token, domain: site.domain, url: '/share/' + token });
 });
 app.delete('/api/shares/:token', adminOnly, (req, res) => {
   const sh = getShare.get(String(req.params.token));
   if (sh && !siteAllowed(req, sh.site_id)) return res.status(403).json(NO_SITE);
+  if (sh) { const st = db.prepare('SELECT domain FROM sites WHERE id = ?').get(sh.site_id); audit(res, 'share.revoke', st ? st.domain : null); }
   db.prepare('DELETE FROM shares WHERE token = ?').run(String(req.params.token));
   res.json({ ok: true });
 });
@@ -745,6 +750,7 @@ app.post('/api/annotations', adminOnly, (req, res) => {
   if (!text) return res.status(400).json({ error: 'Write a short note' });
   const by = req.principal && req.principal.user ? req.principal.user.username : (req.principal && req.principal.kind === 'apikey' ? 'API' : null);
   const info = db.prepare('INSERT INTO annotations (site_id, day, text, created_by, created) VALUES (?, ?, ?, ?, ?)').run(site.id, day, text, by, Date.now());
+  audit(res, 'note.add', `${site.domain} ${day}: ${text}`);
   res.json({ id: info.lastInsertRowid, day, text, created_by: by });
 });
 app.delete('/api/annotations/:id', adminOnly, (req, res) => {
@@ -752,6 +758,7 @@ app.delete('/api/annotations/:id', adminOnly, (req, res) => {
   if (!a) return res.json({ ok: true });
   if (!siteAllowed(req, a.site_id)) return res.status(403).json(NO_SITE);
   db.prepare('DELETE FROM annotations WHERE id = ?').run(a.id);
+  audit(res, 'note.remove', `${a.day}: ${a.text}`);
   res.json({ ok: true });
 });
 
@@ -777,11 +784,13 @@ app.post('/api/funnels', adminOnly, (req, res) => {
   }));
   if (steps.some((s) => !s.value)) return res.status(400).json({ error: 'Every step needs a value' });
   const info = db.prepare('INSERT INTO funnels (site_id, name, steps, created) VALUES (?, ?, ?, ?)').run(site.id, name, JSON.stringify(steps), Date.now());
+  audit(res, 'funnel.add', `${site.domain}: ${name}`);
   res.json({ id: info.lastInsertRowid, name, steps });
 });
 app.delete('/api/funnels/:id', adminOnly, (req, res) => {
-  const f = db.prepare('SELECT site_id FROM funnels WHERE id = ?').get(Number(req.params.id));
+  const f = db.prepare('SELECT site_id, name FROM funnels WHERE id = ?').get(Number(req.params.id));
   if (f && !siteAllowed(req, f.site_id)) return res.status(403).json(NO_SITE);
+  if (f) audit(res, 'funnel.remove', f.name);
   db.prepare('DELETE FROM funnels WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });

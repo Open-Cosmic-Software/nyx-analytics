@@ -237,6 +237,8 @@ Everyone can turn on, **optionally**:
 
 **Forgot the password?** An owner clicks **Password link** next to the person in Settings → Team: a one-time link (24 h) to set a new one. Their 2FA stays on and all their sessions end.
 
+**Activity log:** owners see every change in Settings → Activity — who added a site, invited someone, changed a role, created an API key, turned 2FA off … with time and address. Failed attempts and sign-ins are not logged, secrets never. Kept for a year (`AUDIT_RETENTION_DAYS`, minimum 30).
+
 **Locked out?** On the server: `tacilytics users` lists accounts, `tacilytics reset-login <username>` prints a new password, turns 2FA off and ends that person's sessions. An owner can also reset a teammate's 2FA in Settings → Team.
 
 **API keys per person:** Settings → Security → API keys creates a personal key (`tk_…`) for scripts, agents and the CLI. It acts as you and never more: it sees only your sites, is **read-only unless you untick it** (a viewer's key always is), and cannot manage the team or change security settings. Keys are stored as SHA-256, shown once, and can be revoked; removing a member revokes theirs.
@@ -254,6 +256,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | `INGEST_SALT` | fixed | Extra server-side secret mixed into the visitor hash (on top of the random daily salt) |
 | `API_KEY` | — | Bearer key for the API / CLI |
 | `DB_PATH` | `./data/analytics.db` | SQLite path |
+| `AUDIT_RETENTION_DAYS` | `365` | How long the team activity log is kept (min. 30) |
 | `DATA_RETENTION_DAYS` | `0` | `0` = keep forever; `>0` purges raw events older than N days, daily (data minimisation) |
 
 ## Privacy & security

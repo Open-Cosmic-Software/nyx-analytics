@@ -394,6 +394,45 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
     assert.strictEqual((await call('GET', '/api/v1/sites', { key: veraKey })).status, 401);
   });
 
+  // audit log
+  {
+    const log = (await call('GET', '/api/audit?limit=500', { token: owner })).j;
+    const has = (actor, action, target) => log.some((e) => e.actor === actor && e.action === action && (target === undefined || e.target === target));
+    await t.test('audit: who did what — team', () => {
+      assert.ok(has('passphrase', 'team.first-owner', 'fabi'));
+      assert.ok(has('fabi', 'team.invite'));
+      assert.ok(has('vera', 'team.join', 'vera'), 'self-signup via invite is attributed to the new member');
+      assert.ok(has('fabi', 'team.reset-link', 'vera'));
+      assert.ok(has('vera', 'me.password.reset-link', 'vera'));
+      assert.ok(has('fabi', 'team.remove', 'vera'));
+    });
+    await t.test('audit: sites, notes, keys, 2FA', () => {
+      assert.ok(has('API key', 'site.add', 'a.test'));
+      assert.ok(has('adam', 'site.add', 'c.test'));
+      assert.ok(has('adam', 'note.add', 'a.test 2026-10-15: Newsletter sent'));
+      assert.ok(has('adam', 'note.remove'));
+      assert.ok(has('fabi', 'me.2fa.on'));
+      assert.ok(has('fabi', 'me.passkey.add', 'Test key'));
+      assert.ok(log.some((e) => e.action === 'me.apikey.add' && /^ci \(tk_.{7}…, read \+ write\)$/.test(e.target)));
+      assert.ok(has('fabi (API key)', 'site.add', 'rw.test'), 'personal key is named as such');
+    });
+    await t.test('audit: failed actions and sign-ins are not logged', () => {
+      // the read-only key tried POST /api/v1/sites and got 403 — no row may exist for that key at all
+      assert.ok(!log.some((e) => e.actor === 'fabi (API key)' && e.action !== 'site.add'), JSON.stringify(log.filter((e) => /API key/.test(e.actor || ''))));
+      assert.strictEqual(log.filter((e) => e.actor === 'fabi (API key)').length, 1, 'exactly one action by the personal key (rw.test)');
+      assert.ok(!log.some((e) => /auth\/login|passkey\/verify/.test(e.action)));
+    });
+    await t.test('audit: no secret ends up in the log', () => {
+      const all = JSON.stringify(log);
+      for (const sec of [veraKey, ownerRoKey, viewerInvite, reset, 'owner-password-1', 'vera-new-password-1', recovery[2]]) assert.ok(!all.includes(sec));
+    });
+    await t.test('audit: only owners (signed in) can read it', async () => {
+      assert.strictEqual((await call('GET', '/api/audit', { token: admin })).status, 403);
+      const k = (await call('POST', '/api/me/keys', { token: owner, body: { name: 'aud', readOnly: false } })).j.key;
+      assert.strictEqual((await call('GET', '/api/audit', { key: k })).status, 403);
+    });
+  }
+
   // storage + restart
   await stop();
   await t.test('no plain session token, invite token or recovery code in the DB', () => {

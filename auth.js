@@ -139,6 +139,15 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       created INTEGER NOT NULL,
       expires INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      actor TEXT,                 -- username, 'API key', 'passphrase', or NULL (public: invite / reset link)
+      action TEXT NOT NULL,       -- e.g. 'site.add', 'team.invite', 'me.totp.enable'
+      target TEXT,                -- what it was about (domain, username, …) — never a secret
+      ip TEXT                     -- address as seen through the proxy; for "was that me?"
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
     CREATE TABLE IF NOT EXISTS api_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       key_hash TEXT NOT NULL UNIQUE,
@@ -188,6 +197,39 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     pkGet: db.prepare('SELECT * FROM passkeys WHERE id = ?'),
   };
   const hasUsers = () => q.userCount.get().n > 0;
+
+  // ── audit log ──────────────────────────────────────────────────────────────
+  // Every successful state change (POST/PATCH/DELETE answered with 2xx) gets one row, written
+  // after the response is sent. Handlers can name the action/target via res.locals.audit;
+  // otherwise method + route are recorded. New endpoints are covered without remembering to.
+  // Not logged: tracking beacons, sign-in steps, WebAuthn option requests (no state change).
+  const AUDIT_SKIP = new Set(['/api/collect', '/auth/login', '/auth/login/totp', '/auth/passkey/options', '/auth/passkey/verify', '/auth/logout', '/api/me/passkeys/options', '/api/me/totp/setup']);
+  const AUDIT_DAYS = Math.max(30, parseInt(process.env.AUDIT_RETENTION_DAYS, 10) || 365);
+  const insAudit = db.prepare('INSERT INTO audit_log (ts, actor, action, target, ip) VALUES (?, ?, ?, ?, ?)');
+  function actorOf(p) {
+    if (!p) return null;
+    if (p.kind === 'user') return p.user.username;
+    if (p.kind === 'userkey') return p.user.username + ' (API key)';
+    if (p.kind === 'apikey') return 'API key';
+    if (p.kind === 'legacy') return 'passphrase';
+    return null;
+  }
+  app.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || AUDIT_SKIP.has(req.path)) return next();
+    res.on('finish', () => {
+      if (res.statusCode < 200 || res.statusCode >= 300) return;
+      try {
+        const a = res.locals.audit || {};
+        const route = req.route ? req.route.path : req.path;
+        const action = a.action || `${req.method} ${route}`;
+        const actor = a.actor !== undefined ? a.actor : actorOf(req.principal);
+        insAudit.run(Date.now(), actor, action, a.target == null ? null : String(a.target).slice(0, 200), clientIp(req));
+      } catch (e) { console.error('audit log:', e.message); }
+    });
+    next();
+  });
+  setInterval(() => db.prepare('DELETE FROM audit_log WHERE ts < ?').run(Date.now() - AUDIT_DAYS * 864e5), 6 * 3600e3).unref();
+  const audit = (res, action, target, actor) => { res.locals.audit = { action, target, ...(actor !== undefined ? { actor } : {}) }; };
   if (hasUsers() && !process.env.TACILYTICS_ORIGIN) {
     console.warn('⚠️  TACILYTICS_ORIGIN is not set. Passkeys use the request host, so they break if the dashboard is reached under another host/port or behind a proxy without X-Forwarded-Proto. Set it to the public dashboard URL.');
   }
@@ -435,6 +477,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const uid = tx();
     if (uid === 'taken') return res.status(409).json({ error: 'This username is taken' });
     if (!uid) return res.status(404).json({ error: 'This invite link is invalid, used or expired' });
+    audit(res, 'team.join', name, name);
     res.json({ token: createSession(uid) });
   });
 
@@ -468,6 +511,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (npw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
     db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(await hashPassword(npw), req.principal.user.id);
     q.sessDelUserExcept.run(req.principal.user.id, req.principal.tokenHash); // sign out other devices
+    audit(res, 'me.password');
     res.json({ ok: true });
   });
 
@@ -493,11 +537,13 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     db.prepare('UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_last_step = ?, recovery = ? WHERE id = ?')
       .run(step, JSON.stringify(codes.map((c) => sha256(normRecovery(c)))), u.id);
     q.sessDelUserExcept.run(u.id, req.principal.tokenHash);
+    audit(res, 'me.2fa.on');
     res.json({ ok: true, recoveryCodes: codes });
   });
   app.post('/api/me/totp/disable', auth, userOnly, async (req, res) => {
     if (!(await needPassword(req, res))) return;
     db.prepare('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(req.principal.user.id);
+    audit(res, 'me.2fa.off');
     res.json({ ok: true });
   });
   app.post('/api/me/recovery', auth, userOnly, async (req, res) => {
@@ -506,6 +552,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!u.totp_secret) return res.status(400).json({ error: '2FA is off' });
     const codes = newRecoveryCodes();
     db.prepare('UPDATE users SET recovery = ? WHERE id = ?').run(JSON.stringify(codes.map((c) => sha256(normRecovery(c)))), u.id);
+    audit(res, 'me.recovery.new');
     res.json({ recoveryCodes: codes });
   });
 
@@ -538,11 +585,21 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const name = String(b.name || '').trim().slice(0, 60) || 'Passkey';
     db.prepare('INSERT INTO passkeys (id, user_id, public_key, counter, transports, name, created) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(c.id, t.userId, Buffer.from(c.publicKey), c.counter || 0, c.transports ? JSON.stringify(c.transports) : null, name, Date.now());
+    audit(res, 'me.passkey.add', name);
     res.json({ ok: true });
   });
   app.delete('/api/me/passkeys/:id', auth, userOnly, (req, res) => {
+    const pk = db.prepare('SELECT name FROM passkeys WHERE id = ? AND user_id = ?').get(String(req.params.id), req.principal.user.id);
     db.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(String(req.params.id), req.principal.user.id);
+    audit(res, 'me.passkey.remove', pk ? pk.name : null);
     res.json({ ok: true });
+  });
+
+  app.get('/api/audit', requireRole('owner'), (req, res) => {
+    if (req.principal.kind === 'userkey') return res.status(403).json({ error: 'API keys cannot read the audit log — sign in' });
+    const before = Number(req.query.before) || Date.now() + 1;
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    res.json(db.prepare('SELECT id, ts, actor, action, target, ip FROM audit_log WHERE ts < ? ORDER BY ts DESC, id DESC LIMIT ?').all(before, limit));
   });
 
   // ── personal API keys ──
@@ -560,10 +617,13 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const name = String(b.name || '').trim().slice(0, 60) || 'API key';
     const info = db.prepare('INSERT INTO api_keys (key_hash, prefix, user_id, name, read_only, created) VALUES (?, ?, ?, ?, ?, ?)')
       .run(sha256(key), key.slice(0, 10), req.principal.user.id, name, readOnly ? 1 : 0, Date.now());
+    audit(res, 'me.apikey.add', `${name} (${key.slice(0, 10)}…, ${readOnly ? 'read-only' : 'read + write'})`);
     res.json({ id: info.lastInsertRowid, key, name, read_only: readOnly }); // the key is shown exactly once
   });
   app.delete('/api/me/keys/:id', auth, userOnly, (req, res) => {
+    const k = db.prepare('SELECT name, prefix FROM api_keys WHERE id = ? AND user_id = ?').get(Number(req.params.id), req.principal.user.id);
     db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.principal.user.id);
+    audit(res, 'me.apikey.revoke', k ? `${k.name} (${k.prefix}…)` : null);
     res.json({ ok: true });
   });
 
@@ -582,6 +642,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (pw.length < MIN_PW) return res.status(400).json({ error: `Password needs at least ${MIN_PW} characters` });
     const info = q.insUser.run(name, await hashPassword(pw), 'owner', null, b64u(crypto.randomBytes(16)), Date.now());
     q.sessDelLegacy.run(); // WEB_PASSWORD sessions end here
+    audit(res, 'team.first-owner', name);
     res.json({ token: createSession(info.lastInsertRowid) });
   });
 
@@ -603,10 +664,12 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const expires = Date.now() + INVITE_DAYS * 864e5;
     db.prepare('INSERT INTO invites (token_hash, role, sites, created_by, created, expires) VALUES (?, ?, ?, ?, ?, ?)')
       .run(sha256(token), role, sites ? JSON.stringify(sites) : null, req.principal.user ? req.principal.user.id : null, Date.now(), expires);
+    audit(res, 'team.invite', role + (sites ? ' · sites ' + sites.join(',') : ''));
     res.json({ url: '/invite/' + token, role, expires });
   });
   app.delete('/api/team/invites/:id', ownerOnly, (req, res) => {
     db.prepare('DELETE FROM invites WHERE id = ? AND used_at IS NULL').run(Number(req.params.id));
+    audit(res, 'team.invite.revoke', '#' + Number(req.params.id));
     res.json({ ok: true });
   });
   app.patch('/api/team/users/:id', ownerOnly, (req, res) => {
@@ -620,6 +683,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (sites === undefined) return res.status(400).json({ error: 'sites must be a list of site ids or null' });
     if (Array.isArray(sites) && !sites.length) return res.status(400).json({ error: 'Pick at least one site' });
     db.prepare('UPDATE users SET role = ?, sites = ? WHERE id = ?').run(role, sites ? JSON.stringify(sites) : null, u.id);
+    audit(res, 'team.change', `${u.username}: ${u.role} → ${role}` + (sites ? ' · sites ' + sites.join(',') : ''));
     res.json(publicUser(q.userById.get(u.id)));
   });
   app.delete('/api/team/users/:id', ownerOnly, (req, res) => {
@@ -633,6 +697,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       q.sessDelUser.run(u.id);
       db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
     })();
+    audit(res, 'team.remove', u.username);
     res.json({ ok: true });
   });
   // owner can reset 2FA of a teammate who lost their phone (the teammate then sets it up again)
@@ -641,6 +706,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     if (!u) return res.status(404).json({ error: 'Unknown user' });
     db.prepare('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = NULL, recovery = NULL WHERE id = ?').run(u.id);
     q.sessDelUser.run(u.id);
+    audit(res, 'team.2fa.reset', u.username);
     res.json({ ok: true });
   });
 
@@ -656,6 +722,7 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
       db.prepare('INSERT INTO password_resets (token_hash, user_id, created_by, created, expires) VALUES (?, ?, ?, ?, ?)')
         .run(sha256(token), u.id, req.principal.user ? req.principal.user.id : null, Date.now(), expires);
     })();
+    audit(res, 'team.reset-link', u.username);
     res.json({ url: '/reset/' + token, username: u.username, expires });
   });
   function resetByToken(token) {
@@ -686,10 +753,12 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     })();
     if (!uid) return res.status(404).json({ error: 'This reset link is invalid, used or expired' });
     // no session here: the person signs in normally (with 2FA, if they have it)
-    res.json({ ok: true, username: q.userById.get(uid).username });
+    const who = q.userById.get(uid).username;
+    audit(res, 'me.password.reset-link', who, who);
+    res.json({ ok: true, username: who });
   });
 
-  return { auth, requireRole, siteAllowed, principal };
+  return { auth, requireRole, siteAllowed, principal, audit };
 }
 
 // ── offline admin (CLI on the server, for lock-outs) ─────────────────────────

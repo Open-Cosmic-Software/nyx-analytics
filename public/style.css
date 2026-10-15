@@ -456,3 +456,9 @@ a.btn, a.btn:hover { text-decoration: none; display: inline-flex; align-items: c
 .swatch.ann { width: 9px; height: 9px; transform: rotate(45deg); border-radius: 1px; background: var(--accent-2, #ff7a5c); }
 .tip-note { color: var(--accent-2, #ff7a5c); }
 body.role-viewer #annBtn { display: none !important; }
+.act-row { align-items: baseline; }
+.act-row .act-time { flex: 0 0 96px; }
+.act-row > span:nth-child(2) { flex: 1; display: block; }
+.act-target { color: var(--text); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 0.8rem; }
+.act-ip { flex: 0 0 auto; font-family: ui-monospace, monospace; }
+@media (max-width: 560px) { .act-ip { display: none; } }
