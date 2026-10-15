@@ -225,7 +225,22 @@ function clientIp(req) {
 
 // ── app ─────────────────────────────────────────────────────────────────────
 const app = express();
-app.set('trust proxy', Number.isFinite(+process.env.TRUST_PROXY) && process.env.TRUST_PROXY !== '' && process.env.TRUST_PROXY != null ? +process.env.TRUST_PROXY : 1);
+const TRUST_PROXY = Number.isFinite(+process.env.TRUST_PROXY) && process.env.TRUST_PROXY !== '' && process.env.TRUST_PROXY != null ? +process.env.TRUST_PROXY : 1;
+app.set('trust proxy', TRUST_PROXY);
+// A real HTTP proxy always appends X-Forwarded-For. A request without it means something else
+// (socat, ssh -L, a TCP forwarder) is in front: then the last XFF entry is client-written and the
+// limits can be bypassed. Normal visitors never send XFF themselves, so they trigger this; an
+// attacker who forges XFF does not, but the warning is already in the log by then. Warn once.
+let warnedNoXff = false;
+if (TRUST_PROXY > 0) {
+  app.use((req, _res, next) => {
+    if (!warnedNoXff && !req.headers['x-forwarded-for']) {
+      warnedNoXff = true;
+      console.warn(`⚠️  TRUST_PROXY=${TRUST_PROXY}, but a request arrived without X-Forwarded-For. No HTTP proxy seen — if a TCP forwarder (socat, ssh -L) is in front, set TRUST_PROXY=0, otherwise clients can bypass the rate limits.`);
+    }
+    next();
+  });
+}
 // Accept both application/json (dashboard) and text/plain (cross-origin beacons).
 app.use(express.json({ limit: '32kb', type: ['application/json', 'text/plain'] }));
 app.disable('x-powered-by');
