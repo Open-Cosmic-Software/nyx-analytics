@@ -11,15 +11,21 @@
     var h = { 'Content-Type': 'application/json' };
     if (token) h['x-session-token'] = token;
     return fetch(path, { method: 'POST', headers: h, body: JSON.stringify(body || {}) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); });
+      .then(function (r) {
+        // non-JSON (route missing, proxy page) → a visible error in r.j.error, never a silent {} (Tyto)
+        return readJson(r).then(function (j) { return { ok: r.ok, status: r.status, j: j || {} }; },
+          function (e) { return { ok: false, status: r.status, j: { error: e.message } }; });
+      });
   }
   // a body that is not JSON (e.g. the SPA page from a server that lacks the route) is an ERROR, never {} —
   // {} or a string would reach rows.map / t.users and break far from the cause (Kiro, 2.2.0)
   function readJson(r) {
+    if (r.status === 204) return Promise.resolve(null); // no body by definition (Kiro)
     var ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
     if (!/\bjson\b/i.test(ct)) return Promise.reject(new Error(r.ok ? 'Server did not answer with JSON (HTTP ' + r.status + ')' : 'HTTP ' + r.status));
     return r.json().catch(function () { throw new Error('Server did not answer with JSON (HTTP ' + r.status + ')'); });
   }
+  window.TaciReadJson = readJson; // app.js api() uses the same rule
   // authenticated calls that also report errors (Taci.api only throws on 401)
   function call(method, path, body) {
     return fetch(path, { method: method, headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('nyx_token') || '' }, body: body ? JSON.stringify(body) : undefined })

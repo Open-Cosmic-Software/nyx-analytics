@@ -44,7 +44,7 @@ test('account.js call(): HTML or a broken body is an error, not {} (rows.map can
   const mk = (status, ct, text) => ({ ok: status < 400, status, headers: { get: (h) => (h.toLowerCase() === 'content-type' ? ct : null) },
     json: () => Promise.resolve().then(() => JSON.parse(text)) });
   let next;
-  const ctx = { fetch: () => Promise.resolve(next), localStorage: { getItem: () => 't' }, JSON, Promise, Error };
+  const ctx = { fetch: () => Promise.resolve(next), localStorage: { getItem: () => 't' }, JSON, Promise, Error, window: {} };
   vm.runInNewContext(body + '\nthis.call = call;', ctx);
   const html = '<!doctype html><html>…</html>';
   next = mk(200, 'text/html; charset=UTF-8', html);
@@ -65,4 +65,34 @@ test('the fallbacks are registered after every other route (a later route would 
   assert.ok(fallback > 0, 'API 404 fallback present');
   const after = src.slice(fallback).split('\n').slice(2).filter((l) => /\bapp\.(get|post|put|patch|delete|use|all)\(/.test(l));
   assert.deepStrictEqual(after, []);
+});
+
+test('app.js api() and account.js post() use readJson too — no silent {} on the main path (Tyto)', async () => {
+  const acc = fs.readFileSync(path.join(ROOT, 'public', 'account.js'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
+  assert.doesNotMatch(acc + app, /\.json\(\)\.catch\(function \(\) \{ return \{\}; \}\)/, 'no json().catch(() => ({})) left');
+  const mk = (status, ct, text) => ({ ok: status < 400, status, headers: { get: (h) => (h.toLowerCase() === 'content-type' ? ct : null) },
+    json: () => Promise.resolve().then(() => JSON.parse(text)) });
+  let next; const win = {};
+  const ctx = { fetch: () => Promise.resolve(next), localStorage: { getItem: () => 't' }, JSON, Promise, Error, window: win };
+  const accBody = acc.slice(acc.indexOf('  function post('), acc.indexOf('  // ── WebAuthn'));
+  vm.runInNewContext(accBody + '\nthis.post = post; this.readJson = readJson;', ctx);
+  assert.strictEqual(typeof win.TaciReadJson, 'function', 'account.js exports readJson for app.js');
+  const apiBody = app.slice(app.indexOf('  function api('), app.indexOf('  // ── flags / names'));
+  const ctx2 = { fetch: () => Promise.resolve(next), window: win, TOKEN: 't', SHARE: '', showLogin: () => {}, Object, Promise, Error };
+  vm.runInNewContext(apiBody + '\nthis.api = api;', ctx2);
+  const html = '<!doctype html><html>…</html>';
+  // api(): the dashboard's main path
+  next = mk(200, 'text/html', html); await assert.rejects(ctx2.api('/api/stats?x'), /did not answer with JSON \(HTTP 200\)/);
+  next = mk(502, 'text/html', '<h1>Bad gateway</h1>'); await assert.rejects(ctx2.api('/api/stats?x'), /HTTP 502/);
+  next = mk(400, 'application/json', '{"error":"Unknown site"}'); assert.deepStrictEqual(await ctx2.api('/api/stats?x'), { error: 'Unknown site' }, 'JSON errors still come back as {error}');
+  next = mk(200, 'application/json', '{"totals":{}}'); assert.deepStrictEqual(await ctx2.api('/api/stats?x'), { totals: {} });
+  // post(): login / bootstrap / reset — a missing route is a visible error, not {}
+  next = mk(200, 'text/html', html);
+  let r = await ctx.post('/auth/login', {}); assert.strictEqual(r.ok, false); assert.match(r.j.error, /did not answer with JSON/);
+  next = mk(401, 'application/json', '{"error":"Wrong password"}');
+  r = await ctx.post('/auth/login', {}); assert.deepStrictEqual([r.ok, r.status, r.j.error], [false, 401, 'Wrong password']);
+  // 204: no body by definition → null, never an exception (Kiro)
+  next = mk(204, null, ''); assert.strictEqual(await ctx.readJson(next), null);
+  r = await ctx.post('/x', {}); assert.deepStrictEqual([r.ok, r.status, JSON.stringify(r.j)], [true, 204, '{}']);
 });

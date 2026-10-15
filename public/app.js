@@ -53,7 +53,8 @@
     opts.headers = Object.assign({ 'Content-Type': 'application/json', 'x-session-token': TOKEN }, opts.headers || {});
     return fetch(path, opts).then(function (r) {
       if (r.status === 401) { if (!SHARE) showLogin(); throw new Error('auth'); }
-      return r.json().catch(function () { return {}; });
+      // same rule as account.js: JSON errors come back as {error}, anything that is not JSON throws (Tyto)
+      return window.TaciReadJson(r);
     });
   }
 
