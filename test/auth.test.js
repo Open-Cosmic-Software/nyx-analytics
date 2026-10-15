@@ -138,6 +138,15 @@ test('accounts, roles, TOTP, passkeys (real server.js)', async (t) => {
   await t.test('legacy session ends once accounts exist', () => assert.strictEqual(r.status, 401));
   r = await call('POST', '/auth/login', { body: { password: WEB_PASSWORD } });
   await t.test('WEB_PASSWORD no longer opens anything', () => assert.strictEqual(r.status, 401));
+  {
+    // a legacy session that somehow survived (e.g. written by an older process) must not work either
+    const leftover = crypto.randomBytes(24).toString('hex');
+    const d = new Database(DB_PATH);
+    d.prepare('INSERT INTO sessions (token_hash, user_id, created, expires) VALUES (?, NULL, ?, ?)').run(crypto.createHash('sha256').update(leftover).digest('hex'), Date.now(), Date.now() + 864e5);
+    d.close();
+    r = await call('GET', '/api/sites', { token: leftover });
+    await t.test('leftover legacy session is refused once accounts exist', () => assert.strictEqual(r.status, 401));
+  }
   r = await call('POST', '/api/team/bootstrap', { token: owner, body: { username: 'x2', password: 'owner-password-2' } });
   await t.test('bootstrap only once', () => assert.strictEqual(r.status, 409));
   r = await call('POST', '/auth/login', { body: { username: 'FABI', password: 'owner-password-1' } });
