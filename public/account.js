@@ -245,8 +245,23 @@
       '<div class="set-card"><h3>' + ico('i-shield') + 'Save your recovery codes</h3>' +
       '<p class="muted">Each code works once, instead of a 6-digit code. Keep them somewhere safe — they are shown only now.</p>' +
       '<div class="snippet recovery">' + codes.map(esc).join('<br>') + '</div>' +
-      '<div class="set-inline"><button class="btn ghost" id="copyRec">Copy</button><button class="btn" id="recDone">I saved them</button></div></div>';
+      '<div class="set-inline"><button class="btn ghost" id="dlRec">' + ico('i-download') + 'Download</button><button class="btn ghost" id="copyRec">Copy</button><button class="btn" id="recDone">I saved them</button></div></div>';
     $('copyRec').onclick = function () { navigator.clipboard.writeText(codes.join('\n')); $('copyRec').textContent = 'Copied ✓'; };
+    $('dlRec').onclick = function () {
+      // plain .txt, built in the browser; the codes never go to the server again
+      var host = location.hostname;
+      var text = 'Tacilytics recovery codes\n' +
+        'Server: ' + location.origin + '\n' +
+        'Account: ' + ((me && me.username) || '') + '\n' +
+        'Created: ' + new Date().toISOString().slice(0, 10) + '\n\n' +
+        'Each code works once, instead of a 6-digit code.\n\n' + codes.join('\n') + '\n';
+      var url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+      var a = document.createElement('a');
+      a.href = url; a.download = 'tacilytics-recovery-codes-' + host.replace(/[^a-z0-9.-]/gi, '_') + '.txt';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      $('dlRec').innerHTML = ico('i-check') + 'Downloaded';
+    };
     $('recDone').onclick = function () { openSettings('security'); };
   }
 
