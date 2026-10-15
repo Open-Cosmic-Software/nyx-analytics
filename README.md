@@ -124,11 +124,11 @@ The default tracker writes nothing to the visitor's device, but it does **read**
 <script defer data-domain="example.com" data-strict data-honor-dnt src="https://analytics.example.com/tacilytics.js"></script>
 ```
 
-In strict mode the tracker does not read local storage, the time zone, the language, the window or screen size, or the DNT/GPC setting. It sends what the page itself knows (domain, path, `document.referrer`, UTM parameters), and the browser adds its usual request headers. The server takes the language from `Accept-Language`, and with `data-honor-dnt` it checks the `DNT` / `Sec-GPC` request headers. Two things are still used for timing and never sent: the page's visibility state (`document.visibilityState`) and the device clock (`Date.now()`, only differences, for time on page). A test runs the tracker with every other device API booby-trapped and fails if strict mode touches one.
+In strict mode the tracker does not read local storage, the time zone, the language, the window or screen size, or the DNT/GPC setting. It sends what the page knows: domain, path, referrer, UTM parameters and time on page; the browser adds its usual request headers. To get there it still uses page state, not device properties: `location` and the query string (UTM), `document.referrer`, the DOM for the optional 404 and site-search detection, and a check that `navigator.sendBeacon` exists. Some authorities (EDPB Guidelines 2/2023) read the rules more broadly than "device properties", so do not take "strict" as "nothing at all". The server takes the language from `Accept-Language`, and with `data-honor-dnt` it checks the `DNT` / `Sec-GPC` request headers. Two things are still used for timing and never sent: the page's visibility state (`document.visibilityState`) and the device clock (`Date.now()`, only differences, for time on page). A test runs the tracker with every other device API booby-trapped and fails if strict mode touches one.
 
 **WordPress plugin:** its role exclusion (don't count logged-in admins, editors …) uses a `localStorage` marker in a small inline script before the tracker. Turn the role exclusion off when you use strict mode; a later plugin release will handle it on the server.
 
-What you give up: **no country** (it came from the time zone), **no scroll depth** (time on page stays), and `?tacilytics=off` does not work — exclude your own visits another way (e.g. a test browser you don't count, or filter yourself out in the dashboard). Strict mode does not decide whether you need consent; that depends on your jurisdiction and the rest of your website. This is not legal advice.
+What you give up: **no country** (it came from the time zone), **no scroll depth** (time on page stays), and `?tacilytics=off` does not work (the console says so) — exclude your own visits another way (e.g. a test browser you don't count, or filter yourself out in the dashboard). Strict mode does not decide whether you need consent; that depends on your jurisdiction and the rest of your website. This is not legal advice.
 
 **Your own visits:** open your site once with `?tacilytics=off` (e.g. `https://example.com/?tacilytics=off`) and that browser is no longer counted on that site. `?tacilytics=on` undoes it. It is stored in the browser's localStorage, nothing is sent; repeat it on every browser and phone you use. Settings → Security has the links for all your sites.
 
@@ -350,7 +350,7 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 | | Tacilytics | Google Analytics |
 |---|---|---|
 | Cookies | ❌ none | ✅ yes |
-| Reads from the device | yes (time zone, language, window size, 1 flag) · none of these in strict mode | ✅ a lot |
+| Reads from the device | a few (time zone, language, window size, one localStorage flag); none in strict mode | ✅ a lot |
 | Stores IPs / personal data | ❌ never | ✅ yes |
 | Self-hosted, you own the data | ✅ | ❌ |
 | Weight | ~2 KB | ~45 KB+ |

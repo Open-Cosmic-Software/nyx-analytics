@@ -46,6 +46,10 @@
         return;
       }
     } catch (e) {} // storage blocked → just count normally
+    else if (/[?&]tacilytics=(off|on)(&|$)/.test(location.search)) {
+      // the query string is part of the page address, not the device
+      try { console.info('Tacilytics: strict mode, ?tacilytics=off/on is not supported (it needs localStorage)'); } catch (e) {}
+    }
 
     var endpoint = new URL(s.src).origin + '/api/collect';
     var tz = '', lang = '';

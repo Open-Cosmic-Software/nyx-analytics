@@ -22,6 +22,7 @@ const TRACKER = fs.readFileSync(path.join(ROOT, 'public', 'tacilytics.js'), 'utf
 function runTracker(attrs, search = '') {
   const touched = new Set();
   const sent = [];
+  const infos = [];
   const trap = (name) => { touched.add(name); throw new Error('device read: ' + name); };
   const listeners = {};
   const script = {
@@ -55,7 +56,7 @@ function runTracker(attrs, search = '') {
   const ctx = {
     window, document, navigator, Intl, history: window.history,
     location: { hostname: 'shop.example', pathname: '/p', search, protocol: 'https:', href: 'https://shop.example/p' + search, hash: '' },
-    URL, URLSearchParams, Blob, JSON, Math, Date, String, Object, Array, setTimeout: () => 0, clearTimeout: () => {}, console: { info() {} },
+    URL, URLSearchParams, Blob, JSON, Math, Date, String, Object, Array, setTimeout: () => 0, clearTimeout: () => {}, console: { info: (m) => infos.push(m) },
   };
   // bare globals the tracker uses resolve to the trapped window properties
   for (const k of ['localStorage', 'sessionStorage', 'screen']) Object.defineProperty(ctx, k, { get: () => trap('window.' + k) });
@@ -63,7 +64,7 @@ function runTracker(attrs, search = '') {
   vm.runInContext(TRACKER, ctx);
   // leave the page → engagement beacon
   for (const fn of listeners.pagehide || []) fn();
-  return { touched: [...touched].sort(), sent };
+  return { touched: [...touched].sort(), sent, infos };
 }
 const bodies = (sent) => sent.map((x) => x.blob);
 
@@ -71,6 +72,7 @@ test('tracker: strict mode reads nothing from the device', async () => {
   const strict = runTracker({ 'data-domain': 'shop.example', 'data-strict': '' }, '?tacilytics=off');
   assert.deepStrictEqual(strict.touched, [], 'strict touched: ' + strict.touched.join(', '));
   assert.ok(strict.sent.length >= 1, 'strict still sends the pageview');
+  assert.ok(strict.infos.some((m) => /strict mode, \?tacilytics=off\/on is not supported/.test(m)), 'console hint for ?tacilytics=off in strict: ' + JSON.stringify(strict.infos));
   const strictDnt = runTracker({ 'data-domain': 'shop.example', 'data-strict': '', 'data-honor-dnt': '' });
   assert.deepStrictEqual(strictDnt.touched, [], 'strict + honor-dnt touched: ' + strictDnt.touched.join(', '));
 });
