@@ -631,8 +631,9 @@ function setupAuth({ app, db, WEB_PASSWORD, API_KEY, rateLimited, clientIp, site
     const key = 'tk_' + crypto.randomBytes(24).toString('base64url');
     const name = String(b.name || '').trim().slice(0, 60) || 'API key';
     if (b.scope === 'hit') {
-      // server mode: bound to explicit sites, never more than the account may see. Any role may create one —
-      // reporting page views is all it can do.
+      // server mode: bound to explicit sites, never more than the account may see. Admin or owner only: reporting
+      // page views is writing data (it can add visitors), and a viewer may not write — same rule as /api/v1/hit in 2.4.0.
+      if (req.principal.role === 'viewer') return res.status(403).json({ error: 'Viewers cannot create server-mode keys' });
       if (!Array.isArray(b.sites) || !b.sites.length) return res.status(400).json({ error: 'Pick the site(s) this server reports for' });
       const ids = [...new Set(b.sites.map(Number))];
       if (ids.some((id) => !allSiteIds().includes(id) || !siteAllowed(req, id))) return res.status(403).json({ error: 'You have no access to one of these sites' });

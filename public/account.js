@@ -281,7 +281,7 @@
       '<p class="muted small">For server mode, create a “server mode (count only)” key: it can only report page views for the sites you tick, nothing else. Never put a read + write key on a web server.</p>' +
       '<div id="keyList"><p class="muted small">Loading…</p></div>' +
       '<div class="set-inline"><input id="keyName" type="text" placeholder="Name, e.g. reporting script" maxlength="60">' +
-      '<select id="keyKind" style="flex:0 0 auto;width:auto"><option value="ro">read-only</option>' + (me.role !== 'viewer' ? '<option value="rw">read + write</option>' : '') + '<option value="hit">server mode (count only)</option></select>' +
+      '<select id="keyKind" style="flex:0 0 auto;width:auto"><option value="ro">read-only</option>' + (me.role !== 'viewer' ? '<option value="rw">read + write</option><option value="hit">server mode (count only)</option>' : '') + '</select>' +
       '<button class="btn" id="keyAdd">Create key</button></div>' +
       '<div id="keySites" class="hide small muted" style="margin-top:8px"></div><div id="keyOut"></div></div>' +
       '<div class="set-card"><h3>' + ico('i-shield') + 'Password</h3>' +

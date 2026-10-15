@@ -175,6 +175,22 @@ test('server mode: POST /api/v1/hit', async (t) => {
     assert.strictEqual((await hit({ domain: 'bravo.test', path: '/hk-forged' }, { Authorization: 'Bearer tk_forgedforgedforgedforged' })).status, 404);
   });
 
+  await t.test('a viewer cannot create a hit key (it would let a read-only role add visitors)', async () => {
+    const inv2 = await j('POST', '/api/team/invites', { role: 'viewer', sites: [a.id] }, owner);
+    const vj = await j('POST', '/api/invite/' + inv2.data.url.split('/').pop(), { username: 'vera', password: 'vera-pass-12345' });
+    assert.ok(vj.data.token, 'viewer joined: ' + JSON.stringify(inv2.data) + ' ' + JSON.stringify(vj.data));
+    const vera = { 'x-session-token': vj.data.token };
+    assert.strictEqual((await mk({ scope: 'hit', sites: [a.id] }, vera)).status, 403, 'viewer creates hit key');
+    const db = new Database(DB_PATH, { readonly: true });
+    const n = db.prepare("SELECT COUNT(*) n FROM api_keys k JOIN users u ON u.id = k.user_id WHERE u.username = 'vera'").get().n;
+    db.close();
+    assert.strictEqual(n, 0, 'nothing stored');
+    // and a viewer's read-only key still cannot report
+    const vk = (await mk({}, vera)).data.key;
+    assert.ok(vk, 'viewer read-only key');
+    assert.strictEqual((await hit({ path: '/vera' }, { Authorization: 'Bearer ' + vk })).status, 403, 'viewer key on /hit');
+  });
+
   await t.test('old keys keep exactly their rights; hits do not flood the audit log', async () => {
     const keys = (await j('GET', '/api/me/keys', undefined, alice)).data;
     assert.strictEqual(keys.find((k) => k.name === 'server').scope, '');

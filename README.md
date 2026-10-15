@@ -163,10 +163,11 @@ app.use((req, res, next) => {
 
 **Which key goes on the web server.** Web servers are where sites get broken into, so the key there should be able to do as little as possible:
 
-- Create a **server mode (count only)** key under Settings → API keys and tick the site(s) it reports for. It can call `POST /api/v1/hit` for those sites and nothing else (`403` everywhere else, reads included), and it never reaches more than the account that created it.
+- Create a **server mode (count only)** key under Settings → API keys (admin or owner) and tick the site(s) it reports for. It can call `POST /api/v1/hit` for those sites and nothing else (`403` everywhere else, reads included), and it never reaches more than the account that created it.
 - **Never** put the `API_KEY` from `.env` on a web server. It is the owner key for every site on the instance.
 - Don't use a read + write key either. It still works on `/api/v1/hit` (as in 2.4.0), but a stolen one can also create public share links, point alert webhooks at any URL, upload or delete imports, and change notes, funnels and the time zone of its sites.
 - If several sites run on different servers, give each server its own key, so one break-in can be revoked without touching the others.
+- Server-mode keys arrived in 2.4.1. Before downgrading to 2.4.0, delete them: 2.4.0 does not know the scope and would treat them as ordinary read-only keys.
 
 - **The visitor IP** is only accepted here, with a server-mode or write key, never on the public `/api/collect`. It is hashed like a tracker hit (daily salt) and never stored. Behind a proxy or load balancer, send the real visitor IP (e.g. `req.ip` with Express `trust proxy` set right), not your proxy's. Without an IP the hit is refused (`400`), because all visitors would fall onto one hash.
 - **Filtered on our side:** bots and monitors (same list as the tracker), requests without a user agent, prefetch / prerender (`purpose`), and `dnt: true` / `gpc: true` if you choose to forward those headers. A key can only report for its own sites. The rate limit (6,000 page views a minute) applies per key, so sites on one shared-hosting IP don't block each other; above it the API answers `429` and the hit is not counted.
