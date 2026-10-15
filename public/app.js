@@ -101,7 +101,7 @@
   var NAMES = { DE: 'Germany', AT: 'Austria', CH: 'Switzerland', GB: 'United Kingdom', US: 'United States', FR: 'France', NL: 'Netherlands', ES: 'Spain', IT: 'Italy', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland', CZ: 'Czechia', BE: 'Belgium', IE: 'Ireland', PT: 'Portugal', CA: 'Canada', AU: 'Australia', BR: 'Brazil', IN: 'India', JP: 'Japan', CN: 'China', RU: 'Russia', TR: 'Turkey', MX: 'Mexico', HU: 'Hungary', RO: 'Romania', GR: 'Greece', UA: 'Ukraine', HR: 'Croatia', NZ: 'New Zealand', SG: 'Singapore', KR: 'South Korea', IL: 'Israel', AE: 'UAE', ZA: 'South Africa' };
 
   // ── login (the form itself lives in account.js: passphrase, accounts, TOTP, passkeys) ──
-  function showLogin() { clearInterval(window.__rt); [].forEach.call(document.querySelectorAll('.modal-overlay:not(#login):not(.hide)'), function (o) { closeModal(o); }); $('login').classList.remove('hide'); $('app').classList.add('hide'); var v = $('appVersion'); if (v) v.textContent = ''; if (window.TaciAccount) window.TaciAccount.prepareLogin(); }
+  function showLogin() { clearInterval(window.__rt); [].forEach.call(document.querySelectorAll('.modal-overlay:not(#login):not(.hide)'), function (o) { closeModal(o, { force: true }); }); $('login').classList.remove('hide'); $('app').classList.add('hide'); var v = $('appVersion'); if (v) v.textContent = ''; if (window.TaciAccount) window.TaciAccount.prepareLogin(); }
   function hideLogin() { $('login').classList.add('hide'); $('app').classList.remove('hide'); }
   function signedIn(token) { TOKEN = token; localStorage.setItem('nyx_token', TOKEN); $('loginErr').textContent = ''; boot(); }
   $('logoutBtn').onclick = function () {

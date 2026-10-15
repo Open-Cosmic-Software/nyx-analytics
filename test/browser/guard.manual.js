@@ -40,6 +40,16 @@ const { chromium } = require('playwright');
     await p.keyboard.press('Escape'); await p.waitForTimeout(250);
     ok(!(await open(id)) && asked.length === 0, `${id}: typed + deleted again → no question`);
   }
+  // Tyto: an expired session must not ask — filled modal + 401 → login on top at once, no confirm
+  await p.click('#addFunnelBtn'); await p.waitForTimeout(700); await p.fill('#funnelName', 'Signup'); asked = [];
+  // end the session on the server only (token stays in the page) → the next API call is a real 401
+  await p.evaluate(() => fetch('/auth/logout', { method: 'POST', headers: { 'x-session-token': localStorage.getItem('nyx_token') } }));
+  await p.evaluate(() => document.getElementById('siteSelect').onchange());
+  await p.waitForTimeout(1500);
+  ok(asked.length === 0, '401 with a filled modal: no confirm');
+  ok(await open('login') && !(await open('funnelModal')), '401 with a filled modal: login visible, funnel closed');
+  // api() rejects with Error('auth') after showLogin() — the expected end of a 401, not a page bug
+  for (let i = errs.length - 1; i >= 0; i--) if (errs[i] === 'auth') errs.splice(i, 1);
   ok(errs.length === 0, 'no page errors ' + JSON.stringify(errs));
   console.log(bad ? `${bad} FAILED` : 'all green'); await b.close(); process.exit(bad ? 1 : 0);
 })();
