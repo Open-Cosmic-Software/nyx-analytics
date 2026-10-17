@@ -1,0 +1,14 @@
+# docker compose up -d  →  http://127.0.0.1:3920 (put TLS in front, see README)
+services:
+  tacilytics:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3920:3920"
+    env_file: .env          # cp .env.example .env and set WEB_PASSWORD, SESSION_SECRET, INGEST_SALT, API_KEY
+    environment:
+      DB_PATH: /data/analytics.db
+    volumes:
+      - tacilytics-data:/data
+volumes:
+  tacilytics-data:
