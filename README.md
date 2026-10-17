@@ -14,7 +14,11 @@
 ![No tracking](https://img.shields.io/badge/IPs%20stored-never-67e8f9)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-4ade80)
 
-<img src="docs/dashboard.png" width="820" alt="Tacilytics dashboard" />
+**[▶ Live demo](https://demo.tacilytics.com)** · **[Website](https://tacilytics.com)** · **[Hosted cloud](https://cloud.tacilytics.com)** · **[Quick start](#quick-start)**
+
+<a href="https://demo.tacilytics.com"><img src="docs/dashboard.png" width="820" alt="Tacilytics dashboard — open the live demo" /></a>
+
+<sub>The demo shows a fictional shop with generated data. No real visitors.</sub>
 
 </div>
 
@@ -46,6 +50,16 @@ npx tacilytics serve      # http://127.0.0.1:3920 — data/ and .env live in thi
 
 Or install it globally: `npm i -g tacilytics`, then `tacilytics serve`.
 Set your own `WEB_PASSWORD`, `SESSION_SECRET`, `INGEST_SALT` and `API_KEY` in a `.env` file in that folder (see [`.env.example`](.env.example)).
+
+**With Docker:**
+
+```bash
+git clone https://github.com/Open-Cosmic-Software/tacilytics.git && cd tacilytics
+cp .env.example .env     # set WEB_PASSWORD, SESSION_SECRET, INGEST_SALT, API_KEY
+docker compose up -d     # http://127.0.0.1:3920 — data lives in the tacilytics-data volume
+```
+
+The container listens on `0.0.0.0` inside, compose publishes it on `127.0.0.1` only. Outside Docker, set `HOST` to change the bind address.
 
 **From source:**
 
@@ -392,17 +406,28 @@ The server-wide `API_KEY` from `.env` keeps owner rights for agents and the CLI 
 - All visitor-supplied values are HTML-escaped before they reach the DOM.
 - Run behind TLS; keep `.env` at `chmod 600`.
 
-## Tacilytics vs. Google Analytics
+## How it compares
 
-| | Tacilytics | Google Analytics |
-|---|---|---|
-| Cookies | ❌ none | ✅ yes |
-| Reads from the device | a few (time zone, language, window size, one localStorage flag); none in strict mode | ✅ a lot |
-| Works without any script on the visitor's device | ✅ server mode | ❌ |
-| Stores IPs / personal data | ❌ never | ✅ yes |
-| Self-hosted, you own the data | ✅ | ❌ |
-| Weight | ~2 KB | ~45 KB+ |
-| Setup | 1 script + 1 process | tag manager, config… |
+An honest overview. Plausible and Umami are good projects; pick what fits you.
+
+| | Tacilytics | Plausible CE | Umami | Google Analytics 4 |
+|---|---|---|---|---|
+| Cookies | ❌ none | ❌ none | ❌ none | ✅ yes |
+| IPs leave your server | ❌ never | ❌ | ❌ | ✅ sent to Google |
+| No script on the device at all | ✅ server mode | ❌ | ❌ | ❌ |
+| Strict mode (no device reads) | ✅ | ❌ | ❌ | ❌ |
+| Mobile app SDK | ✅ Flutter | ❌ | ❌ | ✅ |
+| Runs on | Node + SQLite file | Elixir + Postgres + ClickHouse | Node + Postgres/MySQL | Google |
+| Tracker size | ~2 KB | ~1 KB | ~2 KB | ~45 KB+ |
+| Built for big traffic (millions/day) | ⚠️ not yet, SQLite | ✅ | ✅ | ✅ |
+| Self-hosted, you own the data | ✅ | ✅ | ✅ | ❌ |
+| Licence | MIT | AGPL | MIT | proprietary |
+
+*As of October 2026, to the best of our knowledge. Spot a mistake? Please [open an issue](https://github.com/Open-Cosmic-Software/tacilytics/issues).*
+
+## Contributing
+
+Issues, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go [privately](SECURITY.md).
 
 ## Credits
 

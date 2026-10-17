@@ -24,6 +24,8 @@ for (const dir of [...new Set([process.cwd(), __dirname])]) {
 }
 
 const PORT = parseInt(process.env.PORT) || 3920;
+// Bind address. Default loopback (put TLS in front); the Docker image sets HOST=0.0.0.0 inside the container.
+const HOST = process.env.HOST || '127.0.0.1';
 const WEB_PASSWORD = process.env.WEB_PASSWORD || 'tacilytics';
 const API_KEY = process.env.API_KEY || ''; // for agents / CLI (Bearer token)
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(16).toString('hex');
@@ -1476,4 +1478,4 @@ if (process.env.TACILYTICS_TEST_HOOKS === '1') {
 app.all(/^\/(api|auth)(\/|$)/, (_req, res) => res.status(404).json({ error: 'Not found' }));
 app.get('*', sendIndex);
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Tacilytics on http://127.0.0.1:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
+app.listen(PORT, HOST, () => console.log(`Tacilytics on http://${HOST}:${PORT}${RETENTION_DAYS ? ` · retention ${RETENTION_DAYS}d` : ''}${DIGEST_WEBHOOK_URL ? ` · digest ${DIGEST_HOUR_UTC}:00 UTC` : ''}`));
